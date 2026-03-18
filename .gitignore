@@ -1,0 +1,424 @@
+# =============================================================================
+# CONFIDENTIAL & SENSITIVE DATA
+# =============================================================================
+
+# Patient / medical records
+data/patients/
+data/records/
+data/raw/
+data/private/
+data/pii/
+data/phi/
+*.patient
+*.medical
+*.health_record
+patient_data.*
+medical_records.*
+health_data.*
+physiological_data.*
+biometric_data.*
+clinical_data.*
+subject_*.csv
+subject_*.json
+participant_*.csv
+participant_*.json
+anonymized_data/
+de_identified/
+
+# Authentication & credentials
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+api_keys.*
+auth_tokens.*
+service_account*.json
+*_credentials.json
+*_secrets.json
+*.secret
+
+# Database dumps & exports
+*.sql
+*.dump
+*.db
+*.sqlite
+*.sqlite3
+db_backup/
+database_exports/
+
+# =============================================================================
+# PLANNING, INTERNAL & BUSINESS DATA
+# =============================================================================
+
+# Project planning & roadmaps
+planning/
+roadmap/
+roadmaps/
+*.roadmap
+internal_docs/
+internal/
+private_notes/
+meeting_notes/
+sprint_planning/
+backlog/
+*.gantt
+
+# Financial & commercial
+pricing/
+contracts/
+invoices/
+billing/
+*.invoice
+*.contract
+budget.*
+financials.*
+
+# Research & proprietary algorithms (unpublished)
+research_drafts/
+unpublished/
+proprietary/
+ip_protected/
+trade_secrets/
+
+# Client & partner data
+clients/
+partners/
+vendor_data/
+customer_data/
+client_configs/
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env/
+env.bak/
+venv.bak/
+.virtualenv/
+.pyenv/
+.conda/
+conda-env/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Testing & coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytestdebug.log
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+
+# Jupyter notebooks checkpoints and outputs
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+*.ipynb_output/
+profile_default/
+ipython_config.py
+
+# =============================================================================
+# MACHINE LEARNING & AI MODELS
+# =============================================================================
+
+# Trained model weights & checkpoints
+models/weights/
+models/checkpoints/
+models/saved/
+checkpoints/
+saved_models/
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+*.pb
+*.tflite
+*.caffemodel
+*.weights
+*.bin
+model_*.json
+
+# Training artifacts
+runs/
+logs/
+tensorboard_logs/
+wandb/
+mlruns/
+.mlflow/
+outputs/
+experiments/
+artifacts/
+
+# Large datasets
+datasets/
+*.npy
+*.npz
+*.parquet
+*.feather
+*.arrow
+*.tfrecord
+*.tfrecords
+
+# =============================================================================
+# SIGNAL PROCESSING & PHYSIOLOGICAL DATA FILES
+# =============================================================================
+
+# Common biomedical signal formats
+*.edf
+*.bdf
+*.gdf
+*.eeg
+*.cnt
+*.set
+*.fif
+*.mff
+*.nwb
+*.mat
+*.hea
+*.dat
+*.rec
+*.ecg
+*.emg
+*.eog
+*.ppg
+*.abp
+*.resp
+*.acq
+*.e2
+*.vhdr
+*.vmrk
+*.edat
+
+# Video / imaging data
+*.dcm
+*.nii
+*.nii.gz
+*.mha
+*.mhd
+*.img
+raw_video/
+recordings/
+sensor_recordings/
+
+# =============================================================================
+# IDEs & EDITORS
+# =============================================================================
+
+# VSCode
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.code-workspace
+
+# PyCharm / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+out/
+
+# Vim / Neovim
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Emacs
+*#
+.#*
+\#*\#
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Spyder
+.spyderproject.cfg
+.spyproject/
+
+# Rope
+.ropeproject/
+
+# =============================================================================
+# OS & SYSTEM FILES
+# =============================================================================
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon?
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# =============================================================================
+# DOCKER & INFRASTRUCTURE
+# =============================================================================
+
+.docker/
+docker-compose.override.yml
+docker-compose.local.yml
+*.override.yml
+*.local.yml
+infra/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# =============================================================================
+# NODE / FRONTEND (if applicable)
+# =============================================================================
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.npm/
+.yarn/
+dist/
+.next/
+.nuxt/
+.cache/
+
+# =============================================================================
+# LOGS & TEMPORARY FILES
+# =============================================================================
+
+*.log
+*.log.*
+logs/
+log/
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.patch
+
+# Profiling
+*.prof
+*.lprof
+profile_output/
+
+# =============================================================================
+# DOCUMENTATION BUILD ARTIFACTS
+# =============================================================================
+
+docs/_build/
+docs/build/
+site/
+_site/
+.docusaurus/
+.sphinx/
+
+# =============================================================================
+# MISC
+# =============================================================================
+
+# Archives (likely contain sensitive or large data)
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.gz
+!requirements*.txt.gz
+
+# Local config overrides
+*.local
+local_settings.py
+local_config.*
+config.local.*
+
+# Claude memory & AI assistant context
+.claude/
+memory/
+*.memory.md
+CLAUDE.md
