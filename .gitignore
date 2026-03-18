@@ -24,6 +24,10 @@ participant_*.csv
 participant_*.json
 anonymized_data/
 de_identified/
+STARTUP_GUIDE.md
+IMPROVEMENTS.md
+CHANGES_SUMMARY.md
+DEVELOPER_GUIDE.md
 
 # Authentication & credentials
 .env

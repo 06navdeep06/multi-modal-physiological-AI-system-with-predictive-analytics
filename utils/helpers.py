@@ -79,22 +79,31 @@ def smooth_signal(arr, window_size=5):
     return smoothed
 
 def peak_detection(signal, threshold=None, min_distance=1):
-    \"\"\"Detect peaks in signal.
+    """Detect peaks in signal.
     
     Args:
         signal: 1D array of signal values
         threshold: Minimum peak value (auto if None)
-        min_distance: Minimum samples between peaks
+        min_distance: Minimum samples between peaks (>=1)
     
     Returns:
         numpy array: Indices of detected peaks
-    \"\"\"
-    signal = np.array(signal)
-    
+    """
+    signal = np.array(signal, dtype=np.float64)
+
+    if signal.size < 3:
+        return np.array([], dtype=int)
+
+    signal_range = np.max(signal) - np.min(signal)
+    if signal_range < 1e-9:
+        return np.array([], dtype=int)
+
     # Auto threshold at 20% of signal range if not specified
     if threshold is None:
-        threshold = np.min(signal) + 0.2 * (np.max(signal) - np.min(signal))
-    
+        threshold = np.min(signal) + 0.2 * signal_range
+
+    min_distance = max(int(min_distance), 1)
+
     # Simple peak detection: value > neighbors
     peaks = np.where((signal[1:-1] > signal[:-2]) & 
                      (signal[1:-1] > signal[2:]) &
@@ -102,12 +111,13 @@ def peak_detection(signal, threshold=None, min_distance=1):
     
     # Remove peaks closer than min_distance
     if len(peaks) > 1:
-        peaks = peaks[np.concatenate(([True], np.diff(peaks) >= min_distance))]
+        keep_mask = np.concatenate(([True], np.diff(peaks) >= min_distance))
+        peaks = peaks[keep_mask]
     
     return peaks
 
 def calculate_stats(arr):
-    \"\"\"Calculate basic statistics.
+    """Calculate basic statistics.
     
     Args:
         arr: Array-like data

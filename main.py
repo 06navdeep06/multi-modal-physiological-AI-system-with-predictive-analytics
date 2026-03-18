@@ -26,7 +26,8 @@ import sys
 import threading
 import time
 import logging
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 
 import cv2
@@ -195,6 +196,45 @@ def get_alert_history():
     with metrics_lock:
         recent = list(reversed(alert_history[-limit:]))
     return jsonify({'alerts': recent, 'total': len(alert_history)})
+
+
+@app.route('/api/alerts/summary', methods=['GET'])
+def get_alert_summary():
+    """Aggregate alert counts and latest entries.
+
+    Query params:
+        limit:      max alerts to inspect (default 200, max 2000)
+        window_sec: optional lookback window in seconds
+    """
+    limit = min(request.args.get('limit', 200, type=int), 2000)
+    window_sec = request.args.get('window_sec', type=int)
+
+    with metrics_lock:
+        recent = list(alert_history[-limit:])
+
+    if window_sec:
+        cutoff = datetime.now() - timedelta(seconds=max(window_sec, 0))
+        filtered = []
+        for alert in recent:
+            ts = alert.get('timestamp')
+            try:
+                alert_time = datetime.fromisoformat(ts) if ts else None
+            except Exception:
+                alert_time = None
+            if alert_time is None or alert_time >= cutoff:
+                filtered.append(alert)
+        recent = filtered
+
+    severity_counts = Counter(a.get('severity', 'warning') for a in recent)
+    latest = recent[-1] if recent else None
+
+    return jsonify({
+        'total': len(recent),
+        'by_severity': dict(severity_counts),
+        'latest': latest,
+        'window_sec': window_sec,
+        'inspected': limit,
+    })
 
 
 @app.errorhandler(Exception)
