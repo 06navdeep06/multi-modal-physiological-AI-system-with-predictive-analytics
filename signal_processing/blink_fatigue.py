@@ -10,6 +10,8 @@ Reference: Soukupová & Čech, "Real-Time Eye Blink Detection using Facial Landm
            Wierwille & Ellsworth, PERCLOS drowsiness metric (1994)
 """
 
+from __future__ import annotations
+
 import numpy as np
 import logging
 from collections import deque

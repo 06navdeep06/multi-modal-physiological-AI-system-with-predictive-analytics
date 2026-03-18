@@ -172,6 +172,27 @@ header {
 .status-ok    { color: var(--c-success);  background: rgba(46,213,115,.12); border-color: var(--c-success); }
 .status-error { color: var(--c-danger);   background: rgba(255,71,87,.12);  border-color: var(--c-danger); }
 
+/* ===== WARMUP NOTICE ===== */
+.warmup-notice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+    font-size: .88em;
+    font-weight: 500;
+    background: rgba(162,155,254,.15);
+    color: var(--c-purple);
+    border: 1px solid var(--c-purple);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.6; }
+}
+
 /* ===== ALERT BANNER ===== */
 .alert-banner {
     display: flex;

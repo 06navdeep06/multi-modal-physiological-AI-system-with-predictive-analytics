@@ -6,6 +6,8 @@ Wraps scikit-learn classifiers with:
   - train() convenience method that persists the fitted model with joblib
 """
 
+from __future__ import annotations
+
 import os
 import numpy as np
 import logging

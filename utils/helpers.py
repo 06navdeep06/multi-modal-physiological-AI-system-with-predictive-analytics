@@ -1,7 +1,7 @@
-\"\"\"Helper utilities for signal processing and data manipulation
+"""Helper utilities for signal processing and data manipulation
 
 Includes normalization, windowing, statistical functions, and data validation.
-\"\"\"
+"""
 
 import numpy as np
 import logging
@@ -9,14 +9,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 def normalize(arr):
-    \"\"\"Normalize array to zero mean and unit variance.
+    """Normalize array to zero mean and unit variance.
     
     Args:
         arr: Array-like data
     
     Returns:
         numpy array: Normalized data
-    \"\"\"
+    """
     arr = np.array(arr)
     mean = np.mean(arr)
     std = np.std(arr)
@@ -25,7 +25,7 @@ def normalize(arr):
     return (arr - mean) / std
 
 def sliding_window(arr, window_size):
-    \"\"\"Extract latest window_size elements from array.
+    """Extract latest window_size elements from array.
     
     Args:
         arr: Array-like data
@@ -33,14 +33,14 @@ def sliding_window(arr, window_size):
     
     Returns:
         numpy array: Last window_size elements or entire array if smaller
-    \"\"\"
+    """
     arr = np.array(arr)
     if len(arr) < window_size:
         return arr
     return arr[-window_size:]
 
 def validate_data(arr, min_len=1, dtype=float):
-    \"\"\"Validate array data format and length.
+    """Validate array data format and length.
     
     Args:
         arr: Array-like data
@@ -49,7 +49,7 @@ def validate_data(arr, min_len=1, dtype=float):
     
     Returns:
         tuple: (is_valid: bool, error_msg: str or None)
-    \"\"\"
+    """
     try:
         data = np.array(arr, dtype=dtype)
         if len(data) < min_len:
@@ -61,7 +61,7 @@ def validate_data(arr, min_len=1, dtype=float):
         return False, str(e)
 
 def smooth_signal(arr, window_size=5):
-    \"\"\"Apply moving average smoothing.
+    """Apply moving average smoothing.
     
     Args:
         arr: Array-like data
@@ -69,7 +69,7 @@ def smooth_signal(arr, window_size=5):
     
     Returns:
         numpy array: Smoothed signal (padded with original edges)
-    \"\"\"
+    """
     arr = np.array(arr)
     if len(arr) < window_size:
         return arr
@@ -124,7 +124,7 @@ def calculate_stats(arr):
     
     Returns:
         dict: Statistics (mean, std, min, max, median)
-    \"\"\"
+    """
     arr = np.array(arr)
     return {
         'mean': float(np.mean(arr)),

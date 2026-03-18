@@ -10,6 +10,8 @@ Also provides:
 - Signal quality (SNR-based) for gating unreliable estimates
 """
 
+from __future__ import annotations
+
 import numpy as np
 import logging
 from .filters import SignalFilters

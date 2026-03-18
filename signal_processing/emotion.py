@@ -8,6 +8,8 @@ Priority chain:
 All backends return the same dict: {emotion: confidence (0–1), ...}
 """
 
+from __future__ import annotations
+
 import cv2
 import numpy as np
 import logging

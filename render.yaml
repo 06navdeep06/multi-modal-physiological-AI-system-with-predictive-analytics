@@ -3,7 +3,13 @@ services:
     name: physiological-ai
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: gunicorn --config gunicorn.conf.py --bind 0.0.0.0:$PORT main:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: DEMO_MODE
+        value: "true"
+      - key: LOG_FILE
+        value: "stdout"
+      - key: FLASK_DEBUG
+        value: "false"

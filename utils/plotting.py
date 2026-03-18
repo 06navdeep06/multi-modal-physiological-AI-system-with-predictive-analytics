@@ -1,7 +1,7 @@
-\"\"\"Plotting utilities for signal visualization and analysis
+"""Plotting utilities for signal visualization and analysis
 
 Includes functions for plotting signals, FFT analysis, and time-domain data.
-\"\"\"
+"""
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -11,10 +11,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Plotting:
-    \"\"\"Collection of plotting utilities for signal analysis.\"\"\"\n    
+    """Collection of plotting utilities for signal analysis."""
+
     @staticmethod
     def plot_signal(signal, title='Signal', xlabel='Time', ylabel='Value', figsize=(10, 4)):
-        \"\"\"Plot time-domain signal.
+        """Plot time-domain signal.
         
         Args:
             signal: 1D array of signal values
@@ -22,7 +23,7 @@ class Plotting:
             xlabel: X-axis label
             ylabel: Y-axis label
             figsize: Figure size (width, height)
-        \"\"\"
+        """
         try:
             plt.figure(figsize=figsize)
             plt.plot(signal, linewidth=1.5)
@@ -37,14 +38,14 @@ class Plotting:
 
     @staticmethod
     def plot_fft(signal, fs, title='Frequency Domain', figsize=(10, 4)):
-        \"\"\"Plot frequency domain (FFT magnitude spectrum).
+        """Plot frequency domain (FFT magnitude spectrum).
         
         Args:
             signal: 1D array of signal values
             fs: Sampling frequency in Hz
             title: Plot title
             figsize: Figure size (width, height)
-        \"\"\"
+        """
         try:
             fft = np.fft.rfft(signal)
             freqs = np.fft.rfftfreq(len(signal), 1/fs)
@@ -63,14 +64,14 @@ class Plotting:
 
     @staticmethod
     def plot_signal_and_fft(signal, fs, title='Signal Analysis', figsize=(14, 5)):
-        \"\"\"Plot signal and its FFT side by side.
+        """Plot signal and its FFT side by side.
         
         Args:
             signal: 1D array of signal values
             fs: Sampling frequency in Hz
             title: Plot title
             figsize: Figure size (width, height)
-        \"\"\"
+        """
         try:
             fig = plt.figure(figsize=figsize)
             gs = gridspec.GridSpec(1, 2, figure=fig)
@@ -102,14 +103,14 @@ class Plotting:
 
     @staticmethod
     def plot_signals_comparison(signals_dict, fs=20, title='Signal Comparison', figsize=(14, 6)):
-        \"\"\"Plot multiple signals for comparison.
+        """Plot multiple signals for comparison.
         
         Args:
             signals_dict: Dict of {name: signal_array}
             fs: Sampling frequency in Hz
             title: Plot title
             figsize: Figure size (width, height)
-        \"\"\"
+        """
         try:
             fig, ax = plt.subplots(figsize=figsize)
             colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown']
@@ -129,14 +130,14 @@ class Plotting:
 
     @staticmethod
     def plot_peaks(signal, peaks, title='Peak Detection', figsize=(12, 5)):
-        \"\"\"Plot signal with detected peaks highlighted.
+        """Plot signal with detected peaks highlighted.
         
         Args:
             signal: 1D array of signal values
             peaks: Array of peak indices
             title: Plot title
             figsize: Figure size (width, height)
-        \"\"\"
+        """
         try:
             plt.figure(figsize=figsize)
             plt.plot(signal, 'b-', linewidth=1.5, label='Signal')
@@ -153,14 +154,14 @@ class Plotting:
 
     @staticmethod
     def plot_histogram(data, bins=50, title='Data Distribution', figsize=(10, 5)):
-        \"\"\"Plot histogram of data distribution.
+        """Plot histogram of data distribution.
         
         Args:
             data: 1D array of values
             bins: Number of histogram bins
             title: Plot title
             figsize: Figure size (width, height)
-        \"\"\"
+        """
         try:
             plt.figure(figsize=figsize)
             plt.hist(data, bins=bins, color='blue', alpha=0.7, edgecolor='black')

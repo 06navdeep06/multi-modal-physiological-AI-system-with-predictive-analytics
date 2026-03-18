@@ -24,11 +24,6 @@ participant_*.csv
 participant_*.json
 anonymized_data/
 de_identified/
-STARTUP_GUIDE.md
-IMPROVEMENTS.md
-CHANGES_SUMMARY.md
-DEVELOPER_GUIDE.md
-
 # Authentication & credentials
 .env
 .env.*
@@ -366,6 +361,18 @@ dist/
 .next/
 .nuxt/
 .cache/
+
+# =============================================================================
+# DATA DIRECTORY (runtime DB, exports – keep folder skeleton via .gitkeep)
+# =============================================================================
+
+data/*
+!data/.gitkeep
+
+# Session exports
+session_*.csv
+session_*.json
+export_*.csv
 
 # =============================================================================
 # LOGS & TEMPORARY FILES

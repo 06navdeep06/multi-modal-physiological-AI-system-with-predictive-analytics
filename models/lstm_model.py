@@ -5,6 +5,8 @@ Fixed: hidden_size was previously hardcoded as 32 in forward() instead of
 using self.hidden_size, which caused shape mismatches with any other value.
 """
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

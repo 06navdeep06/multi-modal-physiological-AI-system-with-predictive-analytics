@@ -17,7 +17,7 @@
 
 // ===== CONFIG =====
 const CONFIG = {
-    API_URL:        'http://localhost:5000/api',
+    API_URL:        '/api',
     POLL_INTERVAL:  1000,       // ms
     STATS_INTERVAL: 15000,      // ms – refresh session stats less often
     CHART_POINTS:   60,         // data points shown per chart
@@ -169,6 +169,10 @@ function fetchStats() {
 function updateMetrics(payload) {
     if (!payload?.data) return;
     const m = payload.data;
+
+    // Warmup indicator – show "Warming up…" until buffers are ready
+    const warmupEl = document.getElementById('warmup-notice');
+    if (warmupEl) warmupEl.style.display = m.warmup ? 'flex' : 'none';
 
     // Scalar metrics
     setText('hr',         fmt(m.hr,        1));

@@ -54,8 +54,16 @@ LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', 10 * 1024 * 1024))  # 10 MB per f
 LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', 5))            # 5 rotated files
 
 # ===== FLASK API =====
-FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
-FLASK_PORT = int(os.getenv('FLASK_PORT', 5000))
-FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-MAX_RETRIES = 3
+FLASK_HOST    = os.getenv('FLASK_HOST', '0.0.0.0')
+# Render injects PORT; fall back to FLASK_PORT, then 5000
+FLASK_PORT    = int(os.getenv('PORT', os.getenv('FLASK_PORT', 5000)))
+FLASK_DEBUG   = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
+# In production set CORS_ORIGINS to your actual dashboard domain, e.g. https://yourdomain.com
+CORS_ORIGINS  = os.getenv('CORS_ORIGINS', '*')
+MAX_RETRIES   = 3
 RETRY_DELAY_SEC = 2
+
+# ===== DEPLOYMENT =====
+# Set DEMO_MODE=true on Render (or any headless environment) to run without a webcam.
+# Synthetic physiological data will be generated so the dashboard remains fully functional.
+DEMO_MODE = os.getenv('DEMO_MODE', 'false').lower() in ('1', 'true', 'yes')

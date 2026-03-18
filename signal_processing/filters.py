@@ -1,7 +1,9 @@
-\"\"\"Signal Processing Filters for Physiological Signal Analysis
+"""Signal Processing Filters for Physiological Signal Analysis
 
-Implements bandpass filtering and detrending for heart rate, respiration, and motion signals.
-\"\"\"
+Implements bandpass filtering and detrending for heart rate, respiration,
+and motion signals.
+"""
+from __future__ import annotations
 
 import numpy as np
 from scipy.signal import butter, filtfilt, detrend
@@ -9,35 +11,31 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class SignalFilters:
-    \"\"\"Collection of signal processing filters.\"\"\"\n    
+    """Collection of signal processing filters."""
+
     @staticmethod
     def bandpass_filter(signal, fs, lowcut=0.7, highcut=4.0, order=4):
-        \"\"\"Apply Butterworth bandpass filter to signal.
-        
+        """Apply a Butterworth bandpass filter.
+
         Args:
-            signal: 1D numpy array of signal values
-            fs: Sampling frequency in Hz
-            lowcut: Lower cutoff frequency in Hz (default 0.7 Hz = 42 BPM)
-            highcut: Upper cutoff frequency in Hz (default 4.0 Hz = 240 BPM)
-            order: Filter order (default 4)
-        
+            signal:  1-D numpy array
+            fs:      Sampling frequency in Hz
+            lowcut:  Lower cutoff (Hz)
+            highcut: Upper cutoff (Hz)
+            order:   Filter order (default 4)
+
         Returns:
             numpy array: Filtered signal
-        \"\"\"
+        """
         try:
-            nyq = 0.5 * fs
-            low = lowcut / nyq
-            high = highcut / nyq
-            
-            # Clip to valid range
-            low = np.clip(low, 0.001, 0.999)
-            high = np.clip(high, 0.001, 0.999)
-            
+            nyq  = 0.5 * fs
+            low  = float(np.clip(lowcut  / nyq, 0.001, 0.999))
+            high = float(np.clip(highcut / nyq, 0.001, 0.999))
             if low >= high:
-                logger.warning(f'Invalid filter range: low={low}, high={high}')
+                logger.warning(f'Invalid bandpass range: {low=:.4f}, {high=:.4f}')
                 return signal
-            
             b, a = butter(order, [low, high], btype='band')
             return filtfilt(b, a, signal)
         except Exception as e:
@@ -46,14 +44,7 @@ class SignalFilters:
 
     @staticmethod
     def detrend_signal(signal):
-        \"\"\"Remove linear trend from signal.
-        
-        Args:
-            signal: 1D numpy array of signal values
-        
-        Returns:
-            numpy array: Detrended signal
-        \"\"\"
+        """Remove linear trend from signal."""
         try:
             return detrend(signal)
         except Exception as e:
@@ -62,20 +53,11 @@ class SignalFilters:
 
     @staticmethod
     def normalize_signal(signal):
-        \"\"\"Normalize signal to zero mean and unit variance.
-        
-        Args:
-            signal: 1D numpy array of signal values
-        
-        Returns:
-            numpy array: Normalized signal
-        \"\"\"
+        """Normalise signal to zero mean and unit variance."""
         try:
             mean = np.mean(signal)
-            std = np.std(signal)
-            if std == 0:
-                return signal - mean
-            return (signal - mean) / std
+            std  = np.std(signal)
+            return (signal - mean) / std if std != 0 else signal - mean
         except Exception as e:
-            logger.error(f'Normalization error: {e}')
+            logger.error(f'Normalisation error: {e}')
             return signal

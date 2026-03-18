@@ -1,34 +1,37 @@
 # Multi-Modal Physiological Monitoring System – Dependencies
+# Install: pip install -r requirements.txt
 
 # ===== CORE VISION & SIGNAL PROCESSING =====
-opencv-python>=4.8.0          # Video capture, face ROI extraction, image ops
-mediapipe>=0.10.0             # Face detection (FaceDetection) and 468-point FaceMesh
-numpy>=1.24.0                 # Numerical arrays and FFT
-scipy>=1.10.0                 # Butterworth filters, Welch PSD, detrend
-
-# ===== DEEP LEARNING =====
-torch>=2.0.0                  # PyTorch – LSTM model, tensor ops
-torchvision>=0.15.0           # Vision utilities (transforms, etc.)
+# Use headless variant on servers (no libGL / display dependency)
+opencv-python-headless>=4.8.0  # Video capture, face ROI, image operations
+mediapipe>=0.10.0              # FaceDetection + FaceMesh (468-point)
+numpy>=1.24.0                  # Array maths, FFT
+scipy>=1.10.0                  # Butterworth filter, Welch PSD, detrend
 
 # ===== MACHINE LEARNING =====
-scikit-learn>=1.3.0           # LogisticRegression, RandomForest
-joblib>=1.3.0                 # Model serialisation / deserialisation
+scikit-learn>=1.3.0            # LogisticRegression, RandomForest
+joblib>=1.3.0                  # Model serialisation
 
 # ===== WEB API =====
-flask>=3.0.0                  # REST API server
-flask-cors>=4.0.0             # Cross-Origin Resource Sharing for frontend
+flask>=3.0.0                   # REST API
+flask-cors>=4.0.0              # CORS support
+python-dotenv>=1.0.0           # Loads .env at startup
+gunicorn>=21.0.0               # Production WSGI server (Linux/Render)
 
-# ===== UTILITIES =====
-python-dotenv>=1.0.0          # .env file support (WEBCAM_INDEX, FLASK_PORT, etc.)
+# ===== VISUALISATION (utils/plotting.py) =====
+matplotlib>=3.7.0              # Offline signal / FFT plots
 
-# ===== OPTIONAL EMOTION DETECTION BACKENDS =====
-# Install ONE of the following for production-quality emotion detection.
-# The system auto-detects which is available and falls back gracefully.
+# ===== OPTIONAL: DEEP LEARNING =====
+# torch and torchvision are only needed to train/run the LSTM model (lstm_model.py).
+# The live system uses the classical scikit-learn model, so these are not required
+# for deployment. Uncomment to enable LSTM support locally:
 #
-# Option A – DeepFace (downloads pre-trained weights automatically):
-#   pip install deepface
+# torch>=2.0.0
+# torchvision>=0.15.0
+
+# ===== OPTIONAL: EMOTION DETECTION BACKENDS =====
+# Install ONE for production-quality emotion recognition.
+# System auto-detects which is available; falls back to geometry heuristic.
 #
-# Option B – FER (Fast & Accurate, lightweight, no download required):
-#   pip install fer
-#
-# Without either, the built-in geometry heuristic is used automatically.
+#   pip install deepface          # Most accurate, downloads weights on first run
+#   pip install fer               # Lightweight, no download required

@@ -10,6 +10,8 @@ Improvements over v1:
   - Valid range extended to 6–36 BPM (0.1–0.6 Hz) to capture faster breathing
 """
 
+from __future__ import annotations
+
 import numpy as np
 import logging
 from scipy.signal import welch

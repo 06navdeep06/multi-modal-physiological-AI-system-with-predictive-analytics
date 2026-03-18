@@ -1,5 +1,7 @@
 """Facial Landmark Detection using MediaPipe FaceMesh (468 points)."""
 
+from __future__ import annotations
+
 import cv2
 import mediapipe as mp
 
