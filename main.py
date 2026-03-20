@@ -97,6 +97,18 @@ total_frames:     int = 0
 _latest_frame: Optional[bytes] = None   # JPEG-encoded bytes of the latest annotated frame
 _frame_lock:   threading.Lock  = threading.Lock()
 
+# ===== BROWSER CAMERA MODE =====
+# When no physical camera is found (e.g. Render cloud), the browser streams
+# frames via POST /api/frame and processing happens here server-side.
+_browser_mode:    bool           = False
+_procs:           dict           = {}      # shared processor instances
+_procs_lock:      threading.Lock = threading.Lock()
+_bc_hr_ema:       Optional[float] = None
+_bc_prev_nose:    Optional[tuple] = None
+_bc_frames:       int            = 0
+_BC_LEFT_EYE  = [33, 160, 158, 133, 153, 144]
+_BC_RIGHT_EYE = [362, 385, 387, 263, 373, 380]
+
 # ===== FLASK APP =====
 app = Flask(__name__)
 CORS(app, origins=CORS_ORIGINS)
@@ -306,6 +318,275 @@ def get_alert_summary():
     })
 
 
+@app.route('/api/frame', methods=['POST'])
+def receive_frame():
+    """Accept a JPEG frame from the browser camera and run the full processing pipeline.
+
+    The browser captures its local camera via getUserMedia, encodes each frame as
+    JPEG and POSTs the raw bytes here.  All signal-processing (face, rPPG, HRV,
+    respiration, blink/fatigue, emotion, stress) runs server-side just as it does
+    in process_video(), and the global metrics dict is updated so every SSE/poll
+    client sees live data.  Returns the annotated JPEG so the browser can optionally
+    show it, but displaying the local <video> (zero latency) is fine too.
+    """
+    global _browser_mode, _bc_hr_ema, _bc_prev_nose, _bc_frames
+    global total_frames, session_start, processing_error
+
+    if not _ensure_processors():
+        return jsonify({'error': 'processors not ready'}), 503
+
+    # ── Decode incoming JPEG ──────────────────────────────────────
+    data = request.get_data()
+    if not data:
+        return jsonify({'error': 'no frame data'}), 400
+    arr = np.frombuffer(data, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        return jsonify({'error': 'invalid frame'}), 400
+
+    # Serialise: processors are stateful ring-buffers, not thread-safe
+    with _procs_lock:
+        if session_start is None:
+            session_start = datetime.now()
+        total_frames += 1
+        _bc_frames   += 1
+
+        face_detector      = _procs['face']
+        landmarks_detector = _procs['lm']
+        rppg_proc          = _procs['rppg']
+        resp_proc          = _procs['resp']
+        blink_proc         = _procs['blink']
+        emotion_det        = _procs['emotion']
+        fusion             = _procs['fusion']
+        clf_model          = _procs['clf']
+        RESP_LM            = Respiration.RESP_LANDMARK_INDICES
+
+        # ── Face detection ────────────────────────────────────────
+        try:
+            bboxes = face_detector.detect(frame)
+            if not bboxes:
+                with metrics_lock:
+                    metrics['face_detected'] = False
+                return jsonify({'face': False}), 200
+            x, y, w, h = bboxes[0]
+            if w <= 0 or h <= 0:
+                return jsonify({'face': False}), 200
+            face_roi = frame[y:y + h, x:x + w]
+        except Exception as e:
+            logger.debug(f'BC face: {e}')
+            return jsonify({'face': False}), 200
+
+        # ── Landmarks ─────────────────────────────────────────────
+        try:
+            lm_list = landmarks_detector.get_landmarks(frame)
+            if not lm_list:
+                return jsonify({'face': False}), 200
+            lm = lm_list[0]
+        except Exception as e:
+            logger.debug(f'BC landmarks: {e}')
+            return jsonify({'face': False}), 200
+
+        # ── Motion gating ─────────────────────────────────────────
+        _motion_px = 0.0
+        if len(lm) > 6:
+            nose_xy = lm[6]
+            if _bc_prev_nose is not None:
+                dx = nose_xy[0] - _bc_prev_nose[0]
+                dy = nose_xy[1] - _bc_prev_nose[1]
+                _motion_px = float((dx * dx + dy * dy) ** 0.5)
+            _bc_prev_nose = nose_xy
+
+        # ── rPPG (CHROM) ──────────────────────────────────────────
+        hr = hrv_metrics = spo2 = signal_quality = rmssd = None
+        hrv_freq = stress_idx = None
+        ppg_signal: list = []
+        rr_intervals: list = []
+        try:
+            fh_y1 = y + max(0, int(h * 0.08))
+            fh_y2 = y + min(h, int(h * 0.38))
+            fh_x1 = x + max(0, int(w * 0.18))
+            fh_x2 = x + min(w, int(w * 0.82))
+            forehead_roi = frame[fh_y1:fh_y2, fh_x1:fh_x2]
+            if forehead_roi.size > 0 and _motion_px < 6.0:
+                rgb_means = (
+                    float(np.mean(forehead_roi[:, :, 2])),
+                    float(np.mean(forehead_roi[:, :, 1])),
+                    float(np.mean(forehead_roi[:, :, 0])),
+                )
+                rppg_proc.update(rgb_means)
+            hr_raw, hrv_metrics = rppg_proc.compute_hr()
+            signal_quality = round(rppg_proc.signal_quality, 2)
+            spo2           = rppg_proc.estimate_spo2()
+            if hr_raw is not None and signal_quality >= SIGNAL_QUALITY_MIN:
+                clipped    = float(np.clip(hr_raw, 30, 220))
+                _bc_hr_ema = clipped if _bc_hr_ema is None \
+                             else _HR_ALPHA * clipped + (1 - _HR_ALPHA) * _bc_hr_ema
+                hr = round(_bc_hr_ema, 1)
+            elif _bc_hr_ema is not None:
+                hr = round(_bc_hr_ema, 1)
+            rmssd        = hrv_metrics.get('rmssd') if hrv_metrics else None
+            hrv_freq     = rppg_proc.compute_hrv_frequency_domain()
+            stress_idx   = rppg_proc.baevsky_stress_index()
+            ppg_signal   = rppg_proc.get_ppg_signal(150)
+            rr_intervals = rppg_proc.rr_intervals[-50:]
+        except Exception as e:
+            logger.debug(f'BC rPPG: {e}')
+
+        # ── Respiration ───────────────────────────────────────────
+        resp_rate = None
+        try:
+            if RESP_LM and max(RESP_LM) < len(lm):
+                resp_proc.update([lm[i][1] for i in RESP_LM])
+                resp_rate = resp_proc.compute_resp_rate()
+        except Exception as e:
+            logger.debug(f'BC resp: {e}')
+
+        # ── Blink / Fatigue / PERCLOS ─────────────────────────────
+        blink_rate = fatigue_score = perclos = drowsiness = microsleeps = None
+        try:
+            all_eye = _BC_LEFT_EYE + _BC_RIGHT_EYE
+            if max(all_eye) < len(lm):
+                left_ear  = BlinkFatigue.compute_ear([lm[i] for i in _BC_LEFT_EYE])
+                right_ear = BlinkFatigue.compute_ear([lm[i] for i in _BC_RIGHT_EYE])
+                blink_proc.update((left_ear, right_ear))
+                result = blink_proc.compute_blink_fatigue()
+                if result[0] is not None:
+                    blink_rate, fatigue_score, perclos, drowsiness, microsleeps = result
+        except Exception as e:
+            logger.debug(f'BC blink: {e}')
+
+        # ── Emotion ───────────────────────────────────────────────
+        emotion = emotion_probs = None
+        try:
+            emotion_probs = emotion_det.predict(face_roi, lm)
+            emotion = max(emotion_probs, key=emotion_probs.get) if emotion_probs else None
+        except Exception as e:
+            logger.debug(f'BC emotion: {e}')
+
+        # ── Stress ────────────────────────────────────────────────
+        stress_level = stress_score_val = None
+        try:
+            fusion.update([
+                hr            or 0.0,
+                rmssd         or 0.0,
+                resp_rate     or 0.0,
+                blink_rate    or 0.0,
+                fatigue_score or 0.0,
+            ])
+            fused = fusion.get_fused_features()
+            if fused is not None:
+                proba = clf_model.predict(fused.reshape(1, -1))
+                if proba is not None and len(proba) > 0:
+                    p = proba[0]
+                    stress_score_val = round(
+                        float(p[1] * 0.5 + p[2]) if len(p) >= 3 else float(p[-1]), 3
+                    )
+                    if stress_score_val < STRESS_THRESHOLDS['low']:
+                        stress_level = 'Low'
+                    elif stress_score_val < STRESS_THRESHOLDS['medium']:
+                        stress_level = 'Medium'
+                    else:
+                        stress_level = 'High'
+        except Exception as e:
+            logger.debug(f'BC stress: {e}')
+
+        # ── Warmup ────────────────────────────────────────────────
+        warmup_done = (
+            len(rppg_proc.r_window)   >= rppg_proc.window_size and
+            len(blink_proc.ear_window) >= blink_proc.window_size and
+            len(resp_proc.window)     >= resp_proc.window_size
+        )
+        warmup_pct = min(100, int(min(
+            len(rppg_proc.r_window)   / rppg_proc.window_size,
+            len(blink_proc.ear_window) / blink_proc.window_size,
+            len(resp_proc.window)     / resp_proc.window_size,
+        ) * 100))
+
+        # ── Alerts ────────────────────────────────────────────────
+        _ts = datetime.now().isoformat()
+        new_alerts: list[dict] = []
+
+        def _al(msg: str, sev: str = 'warning') -> None:
+            new_alerts.append({'message': msg, 'severity': sev, 'timestamp': _ts})
+
+        if stress_level == 'High':
+            _al('High stress detected', 'critical')
+        if fatigue_score and fatigue_score > FATIGUE_THRESHOLD:
+            _al('High fatigue detected')
+        if drowsiness and drowsiness in DROWSINESS_ALERT_LEVELS:
+            _al(f'Drowsiness: {drowsiness}', 'critical')
+        if hr and (hr < HR_NORMAL_RANGE[0] or hr > HR_NORMAL_RANGE[1]):
+            _al(f'Abnormal HR: {hr:.0f} BPM')
+        if rmssd and rmssd < HRV_RMSSD_LOW:
+            _al('Low HRV – elevated autonomic stress')
+        if spo2 and spo2 < SPO2_LOW_THRESHOLD:
+            _al(f'Low SpO2: {spo2:.1f}%', 'critical')
+
+        # ── Metrics update ────────────────────────────────────────
+        with metrics_lock:
+            metrics.update({
+                'hr':            hr,
+                'hrv':           hrv_metrics,
+                'rmssd':         round(rmssd, 2) if rmssd else None,
+                'resp':          resp_rate,
+                'blink':         round(blink_rate, 1) if blink_rate is not None else None,
+                'fatigue':       round(fatigue_score, 3) if fatigue_score is not None else None,
+                'perclos':       perclos,
+                'drowsiness':    drowsiness,
+                'microsleeps':   microsleeps,
+                'emotion':       emotion,
+                'emotion_scores': emotion_probs,
+                'stress':        stress_level,
+                'stress_score':  stress_score_val,
+                'spo2':          spo2,
+                'signal_quality': signal_quality,
+                'hrv_freq':      hrv_freq,
+                'lf_hf_ratio':   hrv_freq.get('lf_hf_ratio') if hrv_freq else None,
+                'coherence':     hrv_freq.get('coherence')    if hrv_freq else None,
+                'lf_power':      hrv_freq.get('lf_power')     if hrv_freq else None,
+                'hf_power':      hrv_freq.get('hf_power')     if hrv_freq else None,
+                'stress_index':  stress_idx,
+                'ppg_signal':    ppg_signal,
+                'rr_intervals':  rr_intervals,
+                'alert':         new_alerts[0]['message'] if new_alerts else None,
+                'alerts':        new_alerts,
+                'timestamp':     _ts,
+                'warmup':        not warmup_done,
+                'warmup_pct':    warmup_pct,
+                'face_detected': True,
+            })
+            processing_error = None
+            for a in new_alerts:
+                alert_history.append(a)
+            if len(alert_history) > MAX_ALERT_HISTORY:
+                del alert_history[:-MAX_ALERT_HISTORY]
+
+        if _bc_frames % DB_SAVE_INTERVAL == 0 and not metrics['warmup']:
+            _save_metrics_db(metrics.copy())
+
+        # ── Annotate frame and store for /video_feed ──────────────
+        try:
+            ann   = frame.copy()
+            sq    = signal_quality or 0.0
+            b_col = (0, 220, 80) if sq >= 0.6 else (0, 165, 255) if sq >= 0.3 else (0, 60, 220)
+            cv2.rectangle(ann, (x, y), (x + w, y + h), b_col, 2)
+            fh_col = (0, 255, 255) if _motion_px < 6.0 else (0, 80, 255)
+            cv2.rectangle(ann,
+                          (x + int(w * 0.18), y + int(h * 0.08)),
+                          (x + int(w * 0.82), y + int(h * 0.38)),
+                          fh_col, 1)
+            _, buf = cv2.imencode('.jpg', ann, [cv2.IMWRITE_JPEG_QUALITY, 82])
+            if _:
+                with _frame_lock:
+                    global _latest_frame
+                    _latest_frame = buf.tobytes()
+                return Response(buf.tobytes(), mimetype='image/jpeg')
+        except Exception as e:
+            logger.debug(f'BC annotation: {e}')
+
+    return ('', 204)
+
+
 @app.errorhandler(Exception)
 def handle_error(error):
     logger.error(f'API error: {error}', exc_info=True)
@@ -476,6 +757,38 @@ def _save_metrics_db(m: dict) -> None:
             ))
     except Exception as e:
         logger.debug(f'DB save error: {e}')
+
+
+# ------------------------------------------------------------------
+# Browser-camera processor pool
+# ------------------------------------------------------------------
+
+def _ensure_processors() -> bool:
+    """Lazily initialise all signal-processing modules (once, thread-safe)."""
+    global _procs
+    with _procs_lock:
+        if _procs:
+            return True
+        try:
+            _procs['face']    = FaceDetector(min_detection_confidence=FACE_DETECTION_CONFIDENCE)
+            _procs['lm']      = FaceLandmarks(
+                min_detection_confidence=FACE_MESH_CONFIDENCE,
+                min_tracking_confidence=FACE_MESH_TRACKING_CONFIDENCE,
+            )
+            _procs['rppg']    = RPPG(fs=FPS, window_sec=RPPG_WINDOW_SEC)
+            _procs['resp']    = Respiration(fs=FPS, window_sec=RESPIRATION_WINDOW_SEC)
+            _procs['blink']   = BlinkFatigue(fs=FPS, window_sec=BLINK_WINDOW_SEC,
+                                              perclos_window_sec=PERCLOS_WINDOW_SEC)
+            _procs['emotion'] = EmotionDetector()
+            _procs['fusion']  = FeatureFusion(window_sec=FUSION_WINDOW_SEC, fs=FPS)
+            _procs['clf']     = ClassicalModel(model_type='logreg',
+                                               model_path=CLASSICAL_MODEL_PATH)
+            logger.info('Browser-camera processors initialised')
+            return True
+        except Exception as e:
+            logger.error(f'Processor init failed: {e}', exc_info=True)
+            _procs = {}
+            return False
 
 
 # ------------------------------------------------------------------
@@ -766,11 +1079,22 @@ def _demo_loop() -> None:
 
 
 def process_video() -> None:
-    global processing_error, session_start, total_frames
+    global processing_error, session_start, total_frames, _browser_mode
     cap: Optional[cv2.VideoCapture] = None
 
     try:
-        cap = _open_camera(WEBCAM_INDEX)
+        try:
+            cap = _open_camera(WEBCAM_INDEX)
+        except RuntimeError as cam_err:
+            logger.warning(
+                f'No physical camera found – switching to browser-camera mode: {cam_err}'
+            )
+            _browser_mode = True
+            _ensure_processors()
+            logger.info('Browser-camera mode active – waiting for frames via POST /api/frame')
+            while not stop_event.is_set():
+                time.sleep(1.0)
+            return
 
         # ── Module initialisation ─────────────────────────────────────
         logger.info('Initialising signal processing modules...')

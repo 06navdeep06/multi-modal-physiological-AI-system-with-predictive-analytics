@@ -889,48 +889,77 @@ function exportCSV() {
 }
 
 // ============================================================
-// VIDEO FEED AUTO-CONNECT
+// BROWSER CAMERA  (replaces server-side MJPEG feed)
 // ============================================================
-function initVideoFeed() {
-    const img = document.getElementById('webcam');
-    if (!img) return;
-    let retryTimer = null;
+let _cameraStream  = null;
+let _frameTimer    = null;
+let _captureCanvas = null;
+let _captureCtx    = null;
 
-    function reconnect() {
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(() => {
-            img.src = '/video_feed?' + Date.now();
-        }, 3000);
+async function initVideoFeed() {
+    const video  = document.getElementById('webcam');
+    const canvas = document.getElementById('capture-canvas');
+    if (!video || !canvas) return;
+
+    _captureCanvas = canvas;
+    _captureCtx    = canvas.getContext('2d');
+    canvas.width   = 640;
+    canvas.height  = 480;
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+            audio: false,
+        });
+        video.srcObject  = stream;
+        _cameraStream    = stream;
+        showBanner('Camera started – warming up signal buffers…', 'info');
+    } catch (err) {
+        showBanner(
+            `Camera access denied: ${err.message} — allow camera permission and reload.`,
+            'error'
+        );
+        console.error('getUserMedia failed:', err);
+        return;
     }
 
-    img.onerror = reconnect;
+    // Send frames to server for processing at ~10 fps
+    _frameTimer = setInterval(() => {
+        if (!video.videoWidth) return;  // not playing yet
+        _captureCtx.drawImage(video, 0, 0, 640, 480);
+        _captureCanvas.toBlob(blob => {
+            if (!blob) return;
+            fetch('/api/frame', {
+                method:  'POST',
+                headers: { 'Content-Type': 'image/jpeg' },
+                body:    blob,
+            }).catch(() => {});  // fire-and-forget; metrics arrive via SSE
+        }, 'image/jpeg', 0.82);
+    }, 100);  // 10 fps
+}
 
-    // Force a fresh connection on page load in case browser cached a failure
-    img.src = '/video_feed?' + Date.now();
+function stopCamera() {
+    clearInterval(_frameTimer);
+    if (_cameraStream) {
+        _cameraStream.getTracks().forEach(t => t.stop());
+        _cameraStream = null;
+    }
 }
 
 // ============================================================
 // CAMERA DIAGNOSTICS
 // ============================================================
 function showCameraInfo() {
-    fetch(`${CFG.API}/camera-info`)
-        .then(r => r.json())
-        .then(d => {
-            const working = d.working_cameras || [];
-            let msg;
-            if (d.demo_mode) {
-                msg = 'Running in DEMO MODE (no camera needed). Set DEMO_MODE=false to use a webcam.';
-            } else if (working.length === 0) {
-                msg = `No camera found. ${d.recommendation}`;
-            } else {
-                const c = working[0];
-                msg = `Camera OK: index ${c.index} via ${c.backend} (${c.width}×${c.height} @ ${c.fps?.toFixed(0)} fps). ${d.recommendation}`;
-            }
-            showBanner(msg, working.length > 0 || d.demo_mode ? 'info' : 'error');
-            // Also log all probed cameras to console for debugging
-            console.table(d.all_probed || []);
-        })
-        .catch(e => showBanner(`Camera diagnostic failed: ${e}`, 'error'));
+    if (_cameraStream) {
+        const track    = _cameraStream.getVideoTracks()[0];
+        const settings = track ? track.getSettings() : {};
+        showBanner(
+            `Browser camera active: ${settings.width ?? '?'}×${settings.height ?? '?'} – frames sent to server for analysis.`,
+            'info'
+        );
+    } else {
+        showBanner('No camera active. Reload and allow camera permission.', 'error');
+    }
 }
 
 // ============================================================
