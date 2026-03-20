@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 import signal
 import sqlite3
@@ -60,15 +61,30 @@ logger = logging.getLogger(__name__)
 
 # ===== GLOBAL STATE =====
 metrics: dict = {
+    # Core vitals
     'hr': None, 'hrv': None, 'rmssd': None,
     'resp': None, 'blink': None, 'fatigue': None,
     'perclos': None, 'drowsiness': None, 'microsleeps': None,
     'emotion': None, 'emotion_scores': None,
     'stress': None, 'stress_score': None,
     'spo2': None, 'signal_quality': None,
+    # Frequency-domain HRV (populated after warm-up)
+    'hrv_freq': None,        # full freq-domain dict
+    'lf_hf_ratio': None,     # sympathovagal balance
+    'coherence': None,       # cardiac coherence %
+    'lf_power': None,
+    'hf_power': None,
+    # Autonomic stress
+    'stress_index': None,    # Baevsky SI (normalised 0–1)
+    # Waveform & Poincaré data
+    'ppg_signal': [],        # last ~150 normalised PPG samples
+    'rr_intervals': [],      # RR series (ms) for Poincaré plot
+    # Housekeeping
     'alert': None, 'alerts': [],
     'timestamp': None,
-    'warmup': True,   # True until all signal buffers have warmed up
+    'warmup': True,
+    'warmup_pct': 0,
+    'face_detected': False,
 }
 metrics_lock: threading.Lock = threading.Lock()
 stop_event:   threading.Event = threading.Event()
@@ -76,6 +92,10 @@ processing_error: Optional[str] = None
 alert_history:    list = []
 session_start:    Optional[datetime] = None
 total_frames:     int = 0
+
+# ===== MJPEG FRAME BUFFER =====
+_latest_frame: Optional[bytes] = None   # JPEG-encoded bytes of the latest annotated frame
+_frame_lock:   threading.Lock  = threading.Lock()
 
 # ===== FLASK APP =====
 app = Flask(__name__)
@@ -185,6 +205,18 @@ def get_alert_history_ep():
     return jsonify({'alerts': recent, 'total': len(alert_history)})
 
 
+@app.route('/api/waveform', methods=['GET'])
+def get_waveform():
+    """Return real-time PPG signal and RR intervals for waveform / Poincaré rendering."""
+    with metrics_lock:
+        return jsonify({
+            'ppg_signal':   metrics.get('ppg_signal', []),
+            'rr_intervals': metrics.get('rr_intervals', []),
+            'signal_quality': metrics.get('signal_quality'),
+            'timestamp':    metrics.get('timestamp'),
+        })
+
+
 @app.route('/api/alerts/summary', methods=['GET'])
 def get_alert_summary():
     limit      = min(request.args.get('limit', 200, type=int), 2000)
@@ -218,6 +250,78 @@ def get_alert_summary():
 def handle_error(error):
     logger.error(f'API error: {error}', exc_info=True)
     return jsonify({'status': 'error', 'message': str(error)}), 500
+
+
+# ------------------------------------------------------------------
+# MJPEG live-video stream  (serves annotated frames from the worker)
+# ------------------------------------------------------------------
+
+def _make_placeholder_frame() -> bytes:
+    """Return a JPEG placeholder when no camera frame is available yet."""
+    try:
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        frame[:, :] = (18, 22, 34)  # dark blue-grey
+        cv2.putText(frame, 'Initialising...', (170, 220),
+                    cv2.FONT_HERSHEY_DUPLEX, 1.1, (100, 150, 255), 2, cv2.LINE_AA)
+        cv2.putText(frame, 'Please position your face in frame', (90, 270),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (140, 140, 200), 1, cv2.LINE_AA)
+        _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return buf.tobytes()
+    except Exception:
+        return b''
+
+
+@app.route('/video_feed')
+def video_feed():
+    """MJPEG stream of the processed (annotated) video feed."""
+    def generate():
+        while not stop_event.is_set():
+            with _frame_lock:
+                jpeg = _latest_frame
+            if jpeg is None:
+                jpeg = _make_placeholder_frame()
+            if jpeg:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
+            time.sleep(1.0 / 25)   # cap stream at 25 FPS
+    return Response(
+        generate(),
+        mimetype='multipart/x-mixed-replace; boundary=frame',
+        headers={'Cache-Control': 'no-cache, no-store, must-revalidate',
+                 'Pragma': 'no-cache'},
+    )
+
+
+# ------------------------------------------------------------------
+# Server-Sent Events  – real-time metrics push at ~4 Hz
+# ------------------------------------------------------------------
+
+@app.route('/api/stream')
+def metrics_stream_sse():
+    """SSE endpoint: pushes a JSON metrics object whenever it changes."""
+    def generate():
+        last_ts: Optional[str] = None
+        while not stop_event.is_set():
+            with metrics_lock:
+                m = metrics.copy()
+            ts = m.get('timestamp')
+            if ts != last_ts:
+                last_ts = ts
+                try:
+                    payload = json.dumps(m, default=str)
+                    yield f'data: {payload}\n\n'
+                except Exception:
+                    pass
+            time.sleep(0.25)   # 4 updates / second
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control':    'no-cache',
+            'X-Accel-Buffering':'no',
+            'Connection':       'keep-alive',
+        },
+    )
 
 
 # ------------------------------------------------------------------
@@ -370,6 +474,46 @@ def _demo_loop() -> None:
 
     emotions = ['neutral', 'happiness', 'sadness', 'anger', 'fear', 'disgust', 'surprise']
 
+    def _demo_frame(hr_v, spo2_v, resp_v, rmssd_v, fatigue_v,
+                    stress_v, sq_v, t_v) -> None:
+        """Generate and store a synthetic DEMO frame for the MJPEG stream."""
+        try:
+            import math as _m
+            frm = np.zeros((480, 640, 3), dtype=np.uint8)
+            frm[:, :] = (12, 18, 32)
+
+            # Pulsing circle simulating a heartbeat
+            pulse = int(abs(_m.sin(t_v * _m.pi * hr_v / 60 / 20)) * 28)
+            cv2.circle(frm, (320, 200), 60 + pulse, (20, 60, 20), -1)
+            cv2.circle(frm, (320, 200), 60 + pulse, (0, 180, 60), 2)
+            cv2.putText(frm, 'DEMO MODE', (215, 30),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 200, 255), 2, cv2.LINE_AA)
+            cv2.putText(frm, '(No camera – synthetic data)', (130, 58),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (120, 140, 180), 1, cv2.LINE_AA)
+
+            lines = [
+                (f'HR:    {hr_v:.0f} BPM',   (80, 290),  (100, 255, 100)),
+                (f'SpO2:  {spo2_v:.1f}%',     (80, 318),  (100, 210, 255)),
+                (f'Resp:  {resp_v:.0f} BPM',  (80, 346),  (200, 220, 100)),
+                (f'HRV:   {rmssd_v:.0f} ms',  (80, 374),  (200, 160, 255)),
+                (f'Fat:   {fatigue_v:.2f}',    (360, 290), (255, 190, 80)),
+                (f'Stress:{stress_v}',         (360, 318), (255, 100, 100) if stress_v == 'High'
+                                                else (255, 200, 80) if stress_v == 'Medium'
+                                                else (100, 255, 100)),
+                (f'SQ:    {int(sq_v * 100)}%', (360, 346), (100, 255, 100)),
+            ]
+            for text, pos, col in lines:
+                cv2.putText(frm, text, pos,
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, col, 1, cv2.LINE_AA)
+
+            _, buf = cv2.imencode('.jpg', frm, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if _:
+                with _frame_lock:
+                    global _latest_frame
+                    _latest_frame = buf.tobytes()
+        except Exception as _e:
+            logger.debug(f'Demo frame error: {_e}')
+
     while not stop_event.is_set():
         t += 1.0
         total_frames += 1
@@ -407,6 +551,31 @@ def _demo_loop() -> None:
             stress_level = 'Medium'
         else:
             stress_level = 'High'
+
+        # Frequency-domain HRV simulation (Mayer wave ~0.1 Hz + RSA ~0.25 Hz)
+        lf_p   = round(max(0.0001, 0.0035 + 0.002  * math.sin(t / 55) + random.gauss(0, 0.0003)), 4)
+        hf_p   = round(max(0.0001, 0.0022 + 0.0012 * math.cos(t / 28) + random.gauss(0, 0.0002)), 4)
+        vlf_p  = round(max(0.0001, 0.0015 + 0.0008 * math.sin(t / 120)), 4)
+        lf_hf  = round(lf_p / (hf_p + 1e-9), 2)
+        coher  = round(max(0, min(100, 40 + 25 * math.sin(t / 40) + random.gauss(0, 5))), 1)
+        si_raw = round(max(0, min(1.0, 0.38 + 0.15 * math.sin(t / 70) + random.gauss(0, 0.03))), 3)
+
+        # Synthetic RR intervals for Poincaré (10–20 intervals, ~800 ms mean)
+        n_rr   = random.randint(14, 22)
+        mean_rr_demo = 60000.0 / max(hr, 40)
+        sdnn_demo    = max(5, rmssd * 1.2)
+        rr_demo = [round(max(400, min(1400,
+                    mean_rr_demo + random.gauss(0, sdnn_demo))), 1)
+                   for _ in range(n_rr)]
+
+        # PPG waveform (synthetic cardiac pulse shape)
+        ppg_demo: list[float] = []
+        for k in range(120):
+            phase = (k / 120.0) * 2 * math.pi * (hr / 60.0) * 6
+            pulse = (math.sin(phase) +
+                     0.3 * math.sin(2 * phase + 0.5) +
+                     0.15 * math.sin(3 * phase + 1.0))
+            ppg_demo.append(round(pulse / 1.45, 4))
 
         # Emotion scores
         top_emotion = random.choices(
@@ -452,10 +621,24 @@ def _demo_loop() -> None:
                 'stress_score':   stress_score,
                 'spo2':           spo2,
                 'signal_quality': sq,
+                # Frequency-domain HRV
+                'hrv_freq':    {'vlf_power': vlf_p, 'lf_power': lf_p, 'hf_power': hf_p,
+                                'lf_hf_ratio': lf_hf, 'coherence': coher,
+                                'lf_pct': round(lf_p / (vlf_p + lf_p + hf_p + 1e-9) * 100, 1),
+                                'hf_pct': round(hf_p / (vlf_p + lf_p + hf_p + 1e-9) * 100, 1)},
+                'lf_hf_ratio': lf_hf,
+                'coherence':   coher,
+                'lf_power':    lf_p,
+                'hf_power':    hf_p,
+                'stress_index': si_raw,
+                'ppg_signal':   ppg_demo,
+                'rr_intervals': rr_demo,
                 'alert':          new_alerts[0]['message'] if new_alerts else None,
                 'alerts':         new_alerts,
                 'timestamp':      _ts,
                 'warmup':         t < 5,
+                'warmup_pct':     100 if t >= 5 else int(t / 5 * 100),
+                'face_detected':  True,
             })
             for a in new_alerts:
                 alert_history.append(a)
@@ -464,6 +647,8 @@ def _demo_loop() -> None:
 
         if total_frames % DB_SAVE_INTERVAL == 0:
             _save_metrics_db(metrics.copy())
+
+        _demo_frame(hr, spo2, resp, rmssd, fatigue, stress_level, sq, t)
 
         time.sleep(1.0)
 
@@ -555,6 +740,9 @@ def process_video() -> None:
 
             # ── rPPG (CHROM) ─────────────────────────────────────────
             hr = hrv_metrics = spo2 = signal_quality = rmssd = None
+            hrv_freq = stress_idx = None
+            ppg_signal: list = []
+            rr_intervals: list = []
             try:
                 rgb_means = (
                     float(np.mean(face_roi[:, :, 2])),  # R  (OpenCV = BGR)
@@ -564,16 +752,20 @@ def process_video() -> None:
                 rppg_proc.update(rgb_means)
                 hr_raw, hrv_metrics = rppg_proc.compute_hr()
                 signal_quality = round(rppg_proc.signal_quality, 2)
-                spo2 = rppg_proc.estimate_spo2()
+                spo2           = rppg_proc.estimate_spo2()
 
                 if hr_raw is not None and signal_quality >= SIGNAL_QUALITY_MIN:
                     clipped = float(np.clip(hr_raw, 30, 220))
-                    # Exponential moving average for stable display
-                    hr_ema = clipped if hr_ema is None \
+                    hr_ema  = clipped if hr_ema is None \
                         else _HR_ALPHA * clipped + (1 - _HR_ALPHA) * hr_ema
                     hr = round(hr_ema, 1)
 
-                rmssd = hrv_metrics.get('rmssd') if hrv_metrics else None
+                rmssd        = hrv_metrics.get('rmssd') if hrv_metrics else None
+                # Advanced HRV — computed every frame (cheap after compute_hr)
+                hrv_freq     = rppg_proc.compute_hrv_frequency_domain()
+                stress_idx   = rppg_proc.baevsky_stress_index()
+                ppg_signal   = rppg_proc.get_ppg_signal(150)
+                rr_intervals = rppg_proc.rr_intervals[-50:]
             except Exception as e:
                 logger.debug(f'rPPG: {e}')
 
@@ -665,6 +857,15 @@ def process_video() -> None:
             if spo2 and spo2 < SPO2_LOW_THRESHOLD:
                 _al(f'Low SpO2: {spo2:.1f}%', 'critical')
 
+            # ── Warmup progress (0–100 %) ─────────────────────────────
+            warmup_pct = min(100, int(
+                min(
+                    len(rppg_proc.r_window)   / rppg_proc.window_size,
+                    len(blink_proc.ear_window) / blink_proc.window_size,
+                    len(resp_proc.window)      / resp_proc.window_size,
+                ) * 100
+            ))
+
             # ── Thread-safe metrics update ────────────────────────────
             with metrics_lock:
                 metrics.update({
@@ -683,16 +884,86 @@ def process_video() -> None:
                     'stress_score':  stress_score_val,
                     'spo2':          spo2,
                     'signal_quality': signal_quality,
+                    # Frequency-domain HRV
+                    'hrv_freq':    hrv_freq,
+                    'lf_hf_ratio': hrv_freq.get('lf_hf_ratio') if hrv_freq else None,
+                    'coherence':   hrv_freq.get('coherence')   if hrv_freq else None,
+                    'lf_power':    hrv_freq.get('lf_power')    if hrv_freq else None,
+                    'hf_power':    hrv_freq.get('hf_power')    if hrv_freq else None,
+                    # Autonomic stress index
+                    'stress_index': stress_idx,
+                    # Waveform & Poincaré
+                    'ppg_signal':   ppg_signal,
+                    'rr_intervals': rr_intervals,
                     'alert':         new_alerts[0]['message'] if new_alerts else None,
                     'alerts':        new_alerts,
                     'timestamp':     _ts,
                     'warmup':        not warmup_done,
+                    'warmup_pct':    warmup_pct,
+                    'face_detected': True,
                 })
                 processing_error = None
                 for a in new_alerts:
                     alert_history.append(a)
                 if len(alert_history) > MAX_ALERT_HISTORY:
                     del alert_history[:-MAX_ALERT_HISTORY]
+
+            # ── Annotate frame for MJPEG stream ───────────────────────
+            try:
+                ann = frame.copy()
+
+                # Face bounding box colour: green=good, orange=fair, red=poor
+                sq = signal_quality or 0.0
+                box_col = (0, 220, 80) if sq >= 0.6 else \
+                          (0, 165, 255) if sq >= 0.3 else (0, 60, 220)
+                cv2.rectangle(ann, (x, y), (x + w, y + h), box_col, 2)
+
+                # Eye landmark dots
+                for idx in LEFT_EYE + RIGHT_EYE:
+                    if idx < len(lm):
+                        cv2.circle(ann, (int(lm[idx][0]), int(lm[idx][1])),
+                                   2, (255, 200, 0), -1)
+
+                # Top-left metric overlay
+                _oy = 26
+                def _ot(text, col=(220, 220, 220)):
+                    nonlocal _oy
+                    cv2.putText(ann, text, (8, _oy),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.52, col, 1, cv2.LINE_AA)
+                    _oy += 20
+
+                if hr:
+                    _ot(f'HR:   {hr:.0f} BPM',     (100, 255, 100))
+                if spo2:
+                    _ot(f'SpO2: {spo2:.1f}%',       (100, 210, 255))
+                if resp_rate:
+                    _ot(f'Resp: {resp_rate:.0f} BPM', (200, 220, 100))
+                if rmssd:
+                    _ot(f'HRV:  {rmssd:.0f} ms',    (200, 160, 255))
+                if fatigue_score is not None:
+                    _ot(f'Fat:  {fatigue_score:.2f}', (255, 190, 80))
+                sq_col = (0, 220, 80) if sq >= 0.6 else \
+                         (0, 165, 255) if sq >= 0.3 else (0, 80, 220)
+                _ot(f'SQ:   {int(sq * 100)}%', sq_col)
+
+                if not warmup_done:
+                    bar_w = int(warmup_pct / 100 * (w - 4))
+                    cv2.rectangle(ann, (x + 2, y + h + 4),
+                                  (x + 2 + bar_w, y + h + 14),
+                                  (100, 200, 255), -1)
+                    cv2.putText(ann, f'Warmup {warmup_pct}%',
+                                (x + 2, y + h + 26),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                                (160, 220, 255), 1, cv2.LINE_AA)
+
+                _, buf = cv2.imencode('.jpg', ann,
+                                      [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if _:
+                    with _frame_lock:
+                        global _latest_frame
+                        _latest_frame = buf.tobytes()
+            except Exception as _fe:
+                logger.debug(f'Frame annotation: {_fe}')
 
             # ── Periodic DB persist ───────────────────────────────────
             if total_frames % DB_SAVE_INTERVAL == 0 and not metrics['warmup']:

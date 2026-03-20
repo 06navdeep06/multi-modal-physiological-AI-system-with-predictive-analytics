@@ -1,208 +1,371 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Real-time multi-modal physiological monitoring dashboard">
-    <title>Physiological Monitoring Dashboard</title>
+    <meta name="description" content="Cambridge Multi-Modal Physiological AI System — Real-time rPPG, HRV, Stress & Emotion Analysis">
+    <title>PhysioAI Monitor — Multi-Modal Physiological Intelligence</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="container">
+<div class="app-wrapper">
 
-        <!-- ===== HEADER ===== -->
-        <header>
-            <div class="header-left">
-                <h1>&#x1fac0; Physiological Monitoring</h1>
-                <div id="session-timer" class="session-timer">Session: 00:00:00</div>
-            </div>
-            <div class="header-right">
-                <button id="theme-toggle" class="btn-icon" title="Toggle dark mode" onclick="toggleTheme()">&#x1f319;</button>
-                <button class="btn btn-outline" onclick="exportCSV()">&#x1f4e5; Export CSV</button>
-                <div id="connection-status" class="status-badge status-ok">&#x1f7e2; Connected</div>
-            </div>
-        </header>
-
-        <!-- ===== WARMUP NOTICE ===== -->
-        <div id="warmup-notice" class="warmup-notice">
-            &#x23f3; Warming up – collecting signal data, please stay in frame&hellip;
-        </div>
-
-        <!-- ===== ALERT BANNER ===== -->
-        <div id="alert-banner" class="alert-banner" style="display:none;"></div>
-
-        <!-- ===== MAIN GRID ===== -->
-        <div class="main-grid">
-
-            <!-- Left: webcam + emotion + session stats -->
-            <div class="col-left">
-
-                <section class="card">
-                    <h2>&#x1f3a5; Live Feed</h2>
-                    <div class="video-container">
-                        <video id="webcam" autoplay muted playsinline></video>
-                        <div class="video-overlay">
-                            <span id="signal-quality-badge" class="sq-badge">SQ: --</span>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="card">
-                    <h2>&#x1f3ad; Emotion</h2>
-                    <div class="emotion-display">
-                        <div id="emotion-label" class="emotion-label">--</div>
-                        <div id="emotion-bars" class="emotion-bars"></div>
-                    </div>
-                </section>
-
-                <section class="card">
-                    <h2>&#x1f4ca; Session Stats</h2>
-                    <div id="session-stats" class="stats-grid">
-                        <div class="stat-item"><span class="stat-label">Avg HR</span><span id="stat-avg-hr" class="stat-value">--</span></div>
-                        <div class="stat-item"><span class="stat-label">Avg SpO2</span><span id="stat-avg-spo2" class="stat-value">--</span></div>
-                        <div class="stat-item"><span class="stat-label">Avg Resp</span><span id="stat-avg-resp" class="stat-value">--</span></div>
-                        <div class="stat-item"><span class="stat-label">Readings</span><span id="stat-readings" class="stat-value">--</span></div>
-                    </div>
-                </section>
-
-            </div>
-
-            <!-- Right: vital metrics -->
-            <div class="col-right">
-
-                <!-- Core vitals -->
-                <section class="card">
-                    <h2>&#x1f493; Vital Signs</h2>
-                    <div class="metrics-grid">
-                        <div class="metric" id="metric-hr">
-                            <div class="metric-icon">&#x2764;&#xfe0f;</div>
-                            <div class="metric-label">Heart Rate</div>
-                            <div class="metric-value" id="hr">--</div>
-                            <div class="metric-unit">BPM</div>
-                        </div>
-                        <div class="metric" id="metric-spo2">
-                            <div class="metric-icon">&#x1fa78;</div>
-                            <div class="metric-label">SpO2</div>
-                            <div class="metric-value" id="spo2">--</div>
-                            <div class="metric-unit">%</div>
-                        </div>
-                        <div class="metric" id="metric-resp">
-                            <div class="metric-icon">&#x1f32c;&#xfe0f;</div>
-                            <div class="metric-label">Respiration</div>
-                            <div class="metric-value" id="resp">--</div>
-                            <div class="metric-unit">BPM</div>
-                        </div>
-                        <div class="metric" id="metric-rmssd">
-                            <div class="metric-icon">&#x1f4c8;</div>
-                            <div class="metric-label">HRV (RMSSD)</div>
-                            <div class="metric-value" id="rmssd">--</div>
-                            <div class="metric-unit">ms</div>
-                        </div>
-                        <div class="metric" id="metric-fatigue">
-                            <div class="metric-icon">&#x1f4a4;</div>
-                            <div class="metric-label">Fatigue</div>
-                            <div class="metric-value" id="fatigue">--</div>
-                            <div class="metric-unit">0–1</div>
-                        </div>
-                        <div class="metric" id="metric-perclos">
-                            <div class="metric-icon">&#x1f441;&#xfe0f;</div>
-                            <div class="metric-label">PERCLOS</div>
-                            <div class="metric-value" id="perclos">--</div>
-                            <div class="metric-unit">%</div>
-                        </div>
-                        <div class="metric" id="metric-blink">
-                            <div class="metric-icon">&#x1f441;</div>
-                            <div class="metric-label">Blink Rate</div>
-                            <div class="metric-value" id="blink">--</div>
-                            <div class="metric-unit">/min</div>
-                        </div>
-                        <div class="metric" id="metric-microsleeps">
-                            <div class="metric-icon">&#x23f0;</div>
-                            <div class="metric-label">Microsleeps</div>
-                            <div class="metric-value" id="microsleeps">--</div>
-                            <div class="metric-unit">events</div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Stress & Drowsiness -->
-                <section class="card">
-                    <h2>&#x26a0;&#xfe0f; Status</h2>
-                    <div class="status-grid">
-                        <div class="status-box">
-                            <div class="status-label">Stress Level</div>
-                            <div id="stress" class="stress-badge">--</div>
-                            <div id="stress-score" class="stress-score"></div>
-                        </div>
-                        <div class="status-box">
-                            <div class="status-label">Drowsiness</div>
-                            <div id="drowsiness" class="drowsiness-badge">--</div>
-                        </div>
-                        <div class="status-box">
-                            <div class="status-label">Signal Quality</div>
-                            <div class="sq-bar-wrap">
-                                <div id="sq-bar" class="sq-bar"></div>
-                            </div>
-                            <div id="sq-value" class="sq-text">--</div>
-                        </div>
-                        <div class="status-box">
-                            <div class="status-label">Last Update</div>
-                            <div id="timestamp" class="timestamp">--</div>
-                        </div>
-                    </div>
-                </section>
-
+    <!-- ===== TOP BAR ===== -->
+    <header class="top-bar">
+        <div class="brand">
+            <div class="brand-icon">&#x2665;</div>
+            <div>
+                <h1>PhysioAI Monitor</h1>
+                <span class="subtitle">Multi-Modal Physiological Intelligence System</span>
             </div>
         </div>
 
-        <!-- ===== CHARTS ===== -->
-        <div class="charts-section">
-            <div class="chart-card">
-                <h3>Heart Rate</h3>
-                <canvas id="chartHR"></canvas>
+        <div class="header-vitals">
+            <div class="hv-chip chip-cardiac" title="Heart Rate">
+                <span class="hv-label">Heart Rate</span>
+                <span class="hv-value" id="hv-hr">-- BPM</span>
             </div>
-            <div class="chart-card">
-                <h3>SpO2</h3>
-                <canvas id="chartSpO2"></canvas>
+            <div class="hv-chip chip-oxygen" title="Blood Oxygen Saturation">
+                <span class="hv-label">SpO&#x2082;</span>
+                <span class="hv-value" id="hv-spo2">-- %</span>
             </div>
-            <div class="chart-card">
-                <h3>Respiration</h3>
-                <canvas id="chartResp"></canvas>
+            <div class="hv-chip chip-hrv" title="HRV RMSSD">
+                <span class="hv-label">HRV RMSSD</span>
+                <span class="hv-value" id="hv-rmssd">-- ms</span>
             </div>
-            <div class="chart-card">
-                <h3>HRV – RMSSD</h3>
-                <canvas id="chartHRV"></canvas>
+            <div class="hv-chip chip-resp" title="Respiration Rate">
+                <span class="hv-label">Respiration</span>
+                <span class="hv-value" id="hv-resp">-- BPM</span>
             </div>
-            <div class="chart-card">
-                <h3>Fatigue &amp; PERCLOS</h3>
-                <canvas id="chartFatigue"></canvas>
-            </div>
-            <div class="chart-card">
-                <h3>Stress Score</h3>
-                <canvas id="chartStress"></canvas>
+            <div class="hv-chip chip-stress" title="Stress Level">
+                <span class="hv-label">Stress</span>
+                <span class="hv-value" id="hv-stress">--</span>
             </div>
         </div>
 
-        <!-- ===== ALERT HISTORY ===== -->
-        <section class="card alert-history-card">
-            <div class="card-header-row">
-                <h2>&#x1f514; Alert History</h2>
-                <button class="btn btn-sm" onclick="clearAlertLog()">Clear</button>
-            </div>
-            <div id="alert-log" class="alert-log">
-                <p class="no-alerts-msg">No alerts yet.</p>
-            </div>
-        </section>
+        <div class="header-controls">
+            <div class="session-timer" id="session-timer">00:00:00</div>
+            <div class="conn-badge conn-ok" id="connection-status">&#x25CF; Live</div>
+            <button class="btn-icon" title="Toggle theme" onclick="toggleTheme()">&#x1f319;</button>
+            <button class="btn btn-outline" onclick="exportCSV()">&#x21a7; Export</button>
+        </div>
+    </header>
 
-        <!-- ===== FOOTER ===== -->
-        <footer>
-            <p>Multi-Modal Physiological AI System with Predictive Analytics</p>
-            <p class="tech-stack">Python &bull; OpenCV &bull; MediaPipe &bull; CHROM rPPG &bull; PyTorch &bull; Flask &bull; SQLite</p>
-        </footer>
-
+    <!-- ===== SYSTEM BAR ===== -->
+    <div class="system-bar">
+        <div id="warmup-notice" class="warmup-notice" style="display:none;">
+            <div class="warmup-text">
+                &#x23f3; Warming up signal buffers &mdash; keep face in frame&hellip;
+                <span id="warmup-pct" class="warmup-pct-label"></span>
+            </div>
+            <div class="warmup-track">
+                <div id="warmup-fill" class="warmup-fill"></div>
+            </div>
+        </div>
+        <div id="alert-banner" class="alert-banner"></div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- ===== MAIN DASHBOARD GRID ===== -->
+    <div class="dashboard-grid">
+
+        <!-- COL 1: Live Feed + PPG Waveform -->
+        <div class="col-feed">
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>Live Feed</div>
+                <div class="video-container">
+                    <img id="webcam" src="/video_feed" alt="Live physiological feed">
+                    <div class="video-overlays">
+                        <span id="face-indicator" class="face-indicator face-none">&#x2716; No face</span>
+                        <span id="sq-badge" class="sq-badge sq-unknown">SQ --</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>rPPG Waveform</div>
+                <div class="ppg-canvas-wrap">
+                    <canvas id="ppgWaveform" height="90"></canvas>
+                    <span class="ppg-label">CHROM rPPG</span>
+                    <span class="ppg-hr-overlay" id="ppg-hr-label"></span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>Emotion Recognition</div>
+                <div class="emotion-top">
+                    <div id="emotion-primary" class="emotion-primary">--</div>
+                    <div id="emotion-confidence" class="emotion-confidence"></div>
+                </div>
+                <div id="emotion-bars" class="emotion-bars"></div>
+            </div>
+
+        </div>
+
+        <!-- COL 2: Vital Signs + Status + ANS -->
+        <div class="col-vitals">
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>Vital Signs</div>
+                <div class="metrics-grid">
+                    <div class="metric" id="metric-hr" data-domain="cardiac">
+                        <div class="metric-icon">&#x2764;</div>
+                        <div class="metric-label">Heart Rate</div>
+                        <div class="metric-value" id="hr">--</div>
+                        <div class="metric-unit">BPM</div>
+                    </div>
+                    <div class="metric" id="metric-spo2" data-domain="oxygen">
+                        <div class="metric-icon">&#x1fa78;</div>
+                        <div class="metric-label">SpO&#x2082;</div>
+                        <div class="metric-value" id="spo2">--</div>
+                        <div class="metric-unit">%</div>
+                    </div>
+                    <div class="metric" id="metric-resp" data-domain="resp">
+                        <div class="metric-icon">&#x1f4a8;</div>
+                        <div class="metric-label">Respiration</div>
+                        <div class="metric-value" id="resp">--</div>
+                        <div class="metric-unit">BPM</div>
+                    </div>
+                    <div class="metric" id="metric-rmssd" data-domain="hrv">
+                        <div class="metric-icon">&#x1f4c8;</div>
+                        <div class="metric-label">HRV RMSSD</div>
+                        <div class="metric-value" id="rmssd">--</div>
+                        <div class="metric-unit">ms</div>
+                    </div>
+                    <div class="metric" id="metric-fatigue" data-domain="fatigue">
+                        <div class="metric-icon">&#x1f4a4;</div>
+                        <div class="metric-label">Fatigue</div>
+                        <div class="metric-value" id="fatigue">--</div>
+                        <div class="metric-unit">0&ndash;1</div>
+                    </div>
+                    <div class="metric" id="metric-perclos" data-domain="fatigue">
+                        <div class="metric-icon">&#x1f441;</div>
+                        <div class="metric-label">PERCLOS</div>
+                        <div class="metric-value" id="perclos">--</div>
+                        <div class="metric-unit">%</div>
+                    </div>
+                    <div class="metric" id="metric-blink" data-domain="resp">
+                        <div class="metric-icon">&#x1f441;&#xfe0f;</div>
+                        <div class="metric-label">Blink Rate</div>
+                        <div class="metric-value" id="blink">--</div>
+                        <div class="metric-unit">/min</div>
+                    </div>
+                    <div class="metric" id="metric-microsleeps" data-domain="fatigue">
+                        <div class="metric-icon">&#x23f0;</div>
+                        <div class="metric-label">Microsleeps</div>
+                        <div class="metric-value" id="microsleeps">--</div>
+                        <div class="metric-unit">events</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>Clinical Status</div>
+                <div class="status-row">
+                    <div class="status-box">
+                        <div class="status-label">Stress Level</div>
+                        <div id="stress" class="stress-badge">--</div>
+                        <div id="stress-score" class="stress-score"></div>
+                    </div>
+                    <div class="status-box">
+                        <div class="status-label">Drowsiness</div>
+                        <div id="drowsiness" class="drowsiness-badge">--</div>
+                    </div>
+                    <div class="status-box">
+                        <div class="status-label">Signal Quality</div>
+                        <div class="sq-bar-row">
+                            <div class="sq-bar-track">
+                                <div id="sq-bar-fill" class="sq-bar-fill sq-unknown"></div>
+                            </div>
+                            <span id="sq-value-text" class="sq-text">--</span>
+                        </div>
+                    </div>
+                    <div class="status-box">
+                        <div class="status-label">Last Update</div>
+                        <div id="timestamp" class="timestamp-val">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>Autonomic Nervous System</div>
+                <div class="ans-panel">
+                    <div class="ans-gauge-row">
+                        <div class="ans-gauge-wrap">
+                            <canvas id="ansGaugeCanvas" width="110" height="110"></canvas>
+                        </div>
+                        <div class="ans-legend">
+                            <div class="ans-legend-item">
+                                <div class="ans-dot ans-dot-symp"></div>
+                                <span class="ans-legend-label">Sympathetic (LF)</span>
+                                <span class="ans-legend-value" id="ans-lf-val">--</span>
+                            </div>
+                            <div class="ans-legend-item">
+                                <div class="ans-dot ans-dot-para"></div>
+                                <span class="ans-legend-label">Parasympathetic (HF)</span>
+                                <span class="ans-legend-value" id="ans-hf-val">--</span>
+                            </div>
+                            <div class="ans-legend-item">
+                                <div class="ans-dot" style="background:var(--c-hrv)"></div>
+                                <span class="ans-legend-label">LF/HF Ratio</span>
+                                <span class="ans-legend-value" id="ans-ratio-val">--</span>
+                            </div>
+                            <div class="ans-legend-item">
+                                <div class="ans-dot" style="background:var(--c-warning)"></div>
+                                <span class="ans-legend-label">Baevsky SI</span>
+                                <span class="ans-legend-value" id="ans-si-val">--</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="coherence-row">
+                        <span class="coherence-label">Cardiac Coherence</span>
+                        <div class="coherence-track">
+                            <div id="coherence-fill" class="coherence-fill"></div>
+                        </div>
+                        <span id="coherence-value" class="coherence-value">--%</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- COL 3: HRV Analysis + Session Stats -->
+        <div class="col-analysis">
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>HRV Analysis</div>
+                <div class="hrv-analysis">
+                    <div class="poincare-wrap">
+                        <canvas id="poincareCanvas" height="160"></canvas>
+                        <span class="poincare-axes-label poincare-xlabel">RR&#8345; (ms)</span>
+                        <span class="poincare-axes-label poincare-ylabel">RR&#8345;&#8330;&#8321; (ms)</span>
+                    </div>
+                    <div class="hrv-bands">
+                        <div class="hrv-band-row band-vlf">
+                            <span class="hrv-band-label" style="color:var(--c-muted)">VLF</span>
+                            <div class="hrv-band-track"><div id="band-vlf" class="hrv-band-fill" style="width:0%"></div></div>
+                            <span id="band-vlf-val" class="hrv-band-val">-- ms²</span>
+                        </div>
+                        <div class="hrv-band-row band-lf">
+                            <span class="hrv-band-label" style="color:var(--c-hrv)">LF</span>
+                            <div class="hrv-band-track"><div id="band-lf" class="hrv-band-fill" style="width:0%"></div></div>
+                            <span id="band-lf-val" class="hrv-band-val">-- ms²</span>
+                        </div>
+                        <div class="hrv-band-row band-hf">
+                            <span class="hrv-band-label" style="color:var(--c-coherence)">HF</span>
+                            <div class="hrv-band-track"><div id="band-hf" class="hrv-band-fill" style="width:0%"></div></div>
+                            <span id="band-hf-val" class="hrv-band-val">-- ms²</span>
+                        </div>
+                    </div>
+                    <div class="lf-hf-ratio-row">
+                        <div>
+                            <div class="lf-hf-label">LF/HF Ratio</div>
+                            <div class="lf-hf-interp" id="lf-hf-interp">--</div>
+                        </div>
+                        <div class="lf-hf-value" id="lf-hf-ratio">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="title-dot"></span>Session Statistics</div>
+                <div class="session-stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Avg HR</span>
+                        <span class="stat-value" id="stat-avg-hr">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Avg SpO&#x2082;</span>
+                        <span class="stat-value" id="stat-avg-spo2">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Avg Resp</span>
+                        <span class="stat-value" id="stat-avg-resp">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Avg RMSSD</span>
+                        <span class="stat-value" id="stat-avg-rmssd">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">HR Range</span>
+                        <span class="stat-value" id="stat-hr-range">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Readings</span>
+                        <span class="stat-value" id="stat-readings">--</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ===== CHARTS ===== -->
+    <div class="charts-section">
+        <div class="chart-card">
+            <div class="chart-title">
+                <span class="chart-title-dot" style="background:var(--c-cardiac)"></span>
+                Heart Rate
+            </div>
+            <canvas id="chartHR"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">
+                <span class="chart-title-dot" style="background:var(--c-oxygen)"></span>
+                Blood Oxygen (SpO&#x2082;)
+            </div>
+            <canvas id="chartSpO2"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">
+                <span class="chart-title-dot" style="background:var(--c-resp)"></span>
+                Respiration Rate
+            </div>
+            <canvas id="chartResp"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">
+                <span class="chart-title-dot" style="background:var(--c-hrv)"></span>
+                HRV &mdash; RMSSD
+            </div>
+            <canvas id="chartHRV"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">
+                <span class="chart-title-dot" style="background:var(--c-fatigue)"></span>
+                Fatigue &amp; PERCLOS
+            </div>
+            <canvas id="chartFatigue"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">
+                <span class="chart-title-dot" style="background:var(--c-stress)"></span>
+                Stress Score
+            </div>
+            <canvas id="chartStress"></canvas>
+        </div>
+    </div>
+
+    <!-- ===== ALERT HISTORY ===== -->
+    <div class="card" style="margin-bottom:4px;">
+        <div class="alert-header-row">
+            <div class="card-title" style="margin-bottom:0"><span class="title-dot"></span>Alert History</div>
+            <button class="btn btn-sm" onclick="clearAlertLog()">Clear</button>
+        </div>
+        <div id="alert-log" class="alert-log">
+            <p class="no-alerts-msg">No alerts recorded.</p>
+        </div>
+    </div>
+
+    <!-- ===== FOOTER ===== -->
+    <footer>
+        <p>Multi-Modal Physiological AI System with Predictive Analytics</p>
+        <p class="tech-stack">Python &bull; OpenCV &bull; MediaPipe &bull; CHROM rPPG &bull; HRV Analysis (ESC 1996) &bull; Baevsky SI &bull; HeartMath Coherence &bull; Flask &bull; SQLite</p>
+    </footer>
+
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>

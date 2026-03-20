@@ -12,9 +12,9 @@ VIDEO_TIMEOUT_SEC = int(os.getenv('VIDEO_TIMEOUT_SEC', 3))
 
 # ===== SIGNAL PROCESSING =====
 FUSION_WINDOW_SEC = int(os.getenv('FUSION_WINDOW_SEC', 60))
-RPPG_WINDOW_SEC = int(os.getenv('RPPG_WINDOW_SEC', 15))       # Longer window for CHROM stability
-RESPIRATION_WINDOW_SEC = int(os.getenv('RESPIRATION_WINDOW_SEC', 15))
-BLINK_WINDOW_SEC = int(os.getenv('BLINK_WINDOW_SEC', 10))
+RPPG_WINDOW_SEC = int(os.getenv('RPPG_WINDOW_SEC', 10))       # 10 s = good CHROM SNR + fast startup
+RESPIRATION_WINDOW_SEC = int(os.getenv('RESPIRATION_WINDOW_SEC', 10))
+BLINK_WINDOW_SEC = int(os.getenv('BLINK_WINDOW_SEC', 8))
 PERCLOS_WINDOW_SEC = int(os.getenv('PERCLOS_WINDOW_SEC', 60)) # Full minute for PERCLOS
 
 # ===== MODEL PATHS =====
@@ -37,13 +37,13 @@ HR_NORMAL_RANGE = (50, 120)         # BPM
 RESP_NORMAL_RANGE = (10, 25)        # BPM
 HRV_RMSSD_LOW = 20.0                # ms – below this flags elevated stress
 SPO2_LOW_THRESHOLD = 95.0           # % – below this triggers alert
-SIGNAL_QUALITY_MIN = 0.15           # Min acceptable SNR for HR results
+SIGNAL_QUALITY_MIN = 0.10           # Min acceptable SNR for HR results (lowered for real-world lighting)
 MAX_ALERT_HISTORY = 200             # Max alerts kept in memory
 
 # ===== FACE DETECTION =====
-FACE_DETECTION_CONFIDENCE = float(os.getenv('FACE_DETECTION_CONFIDENCE', 0.7))
-FACE_MESH_CONFIDENCE = float(os.getenv('FACE_MESH_CONFIDENCE', 0.5))
-FACE_MESH_TRACKING_CONFIDENCE = float(os.getenv('FACE_MESH_TRACKING_CONFIDENCE', 0.5))
+FACE_DETECTION_CONFIDENCE = float(os.getenv('FACE_DETECTION_CONFIDENCE', 0.5))
+FACE_MESH_CONFIDENCE = float(os.getenv('FACE_MESH_CONFIDENCE', 0.4))
+FACE_MESH_TRACKING_CONFIDENCE = float(os.getenv('FACE_MESH_TRACKING_CONFIDENCE', 0.4))
 
 # ===== LOGGING =====
 LOG_LEVEL_STR = os.getenv('LOG_LEVEL', 'INFO')
