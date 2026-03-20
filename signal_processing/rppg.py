@@ -92,7 +92,8 @@ class RPPG:
         ------------
         Populates ``_rr_intervals`` and ``_chrom_signal``.
         """
-        if len(self.r_window) < self.window_size:
+        min_samples = self.fs * 3   # allow early estimates after 3 s
+        if len(self.r_window) < min_samples:
             return None, None
         try:
             chrom    = self._compute_chrom_signal()

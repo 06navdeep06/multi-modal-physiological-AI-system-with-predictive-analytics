@@ -107,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchStats();
     drawANSGauge(0, 0);         // blank initial state
     drawPoincare([]);
+    initVideoFeed();
 });
 
 window.addEventListener('beforeunload', () => {
@@ -885,6 +886,27 @@ function applyStoredTheme() {
 // ============================================================
 function exportCSV() {
     window.open(`${CFG.API}/export?limit=5000`, '_blank');
+}
+
+// ============================================================
+// VIDEO FEED AUTO-CONNECT
+// ============================================================
+function initVideoFeed() {
+    const img = document.getElementById('webcam');
+    if (!img) return;
+    let retryTimer = null;
+
+    function reconnect() {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+            img.src = '/video_feed?' + Date.now();
+        }, 3000);
+    }
+
+    img.onerror = reconnect;
+
+    // Force a fresh connection on page load in case browser cached a failure
+    img.src = '/video_feed?' + Date.now();
 }
 
 // ============================================================

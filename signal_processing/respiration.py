@@ -62,7 +62,8 @@ class Respiration:
         Returns:
             float|None: Respiration rate in breaths per minute, or None
         """
-        if len(self.window) < self.window_size:
+        min_samples = self.fs * 4   # allow early estimates after 4 s
+        if len(self.window) < min_samples:
             return None
 
         try:

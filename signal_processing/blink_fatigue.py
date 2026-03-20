@@ -116,7 +116,8 @@ class BlinkFatigue:
             - drowsiness:   'Alert' | 'Mild' | 'Moderate' | 'Severe'
             - microsleeps:  cumulative microsleep events this session
         """
-        if len(self.ear_window) < self.window_size:
+        min_samples = self.fs * 3   # allow early estimates after 3 s
+        if len(self.ear_window) < min_samples:
             return None, None, None, None, None
 
         try:
