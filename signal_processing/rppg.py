@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 import logging
-from scipy.signal import welch
+from scipy.signal import welch, find_peaks
 
 from .filters import SignalFilters
 
@@ -333,20 +333,26 @@ class RPPG:
 
     def _compute_hrv(self, filtered_signal: np.ndarray,
                      hr_hz: float) -> dict | None:
-        """Time-domain HRV from peak-detected RR intervals.
+        """Time-domain HRV from scipy peak detection with adaptive prominence.
+
+        Uses ``scipy.signal.find_peaks`` with:
+          - ``distance``: minimum samples between peaks (from dominant HR)
+          - ``prominence``: 30 % of signal std-dev — rejects noise spikes
+            while keeping true cardiac peaks in noisy webcam signals.
 
         Also stores detected RR series in ``_rr_intervals`` for use by
         ``compute_hrv_frequency_domain`` and ``baevsky_stress_index``.
         """
         try:
-            min_distance = max(1, int(self.fs / (hr_hz * 1.6)))
+            min_distance  = max(1, int(self.fs / (hr_hz * 1.6)))
+            min_prom      = float(np.std(filtered_signal)) * 0.30
 
-            peaks: list[int] = []
-            for i in range(1, len(filtered_signal) - 1):
-                if (filtered_signal[i] > filtered_signal[i - 1] and
-                        filtered_signal[i] > filtered_signal[i + 1]):
-                    if not peaks or (i - peaks[-1]) >= min_distance:
-                        peaks.append(i)
+            peaks, _ = find_peaks(
+                filtered_signal,
+                distance=min_distance,
+                prominence=min_prom,
+            )
+            peaks = peaks.tolist()
 
             if len(peaks) < 3:
                 return None

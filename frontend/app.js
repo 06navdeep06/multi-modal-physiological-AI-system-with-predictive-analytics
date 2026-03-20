@@ -888,6 +888,30 @@ function exportCSV() {
 }
 
 // ============================================================
+// CAMERA DIAGNOSTICS
+// ============================================================
+function showCameraInfo() {
+    fetch(`${CFG.API}/camera-info`)
+        .then(r => r.json())
+        .then(d => {
+            const working = d.working_cameras || [];
+            let msg;
+            if (d.demo_mode) {
+                msg = 'Running in DEMO MODE (no camera needed). Set DEMO_MODE=false to use a webcam.';
+            } else if (working.length === 0) {
+                msg = `No camera found. ${d.recommendation}`;
+            } else {
+                const c = working[0];
+                msg = `Camera OK: index ${c.index} via ${c.backend} (${c.width}×${c.height} @ ${c.fps?.toFixed(0)} fps). ${d.recommendation}`;
+            }
+            showBanner(msg, working.length > 0 || d.demo_mode ? 'info' : 'error');
+            // Also log all probed cameras to console for debugging
+            console.table(d.all_probed || []);
+        })
+        .catch(e => showBanner(`Camera diagnostic failed: ${e}`, 'error'));
+}
+
+// ============================================================
 // UTILITIES
 // ============================================================
 function setText(id, val) {

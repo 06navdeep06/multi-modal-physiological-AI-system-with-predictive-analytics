@@ -14,6 +14,8 @@ class FaceLandmarks:
         self._mesh = self._mp.FaceMesh(
             static_image_mode=static_mode,
             max_num_faces=max_faces,
+            refine_landmarks=True,       # enables iris + more precise lip/eye contours
+            model_complexity=1,          # higher-accuracy model (vs 0)
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
         )

@@ -205,6 +205,66 @@ def get_alert_history_ep():
     return jsonify({'alerts': recent, 'total': len(alert_history)})
 
 
+@app.route('/api/camera-info', methods=['GET'])
+def camera_info():
+    """Diagnostic: probe available cameras and report their status.
+
+    Scans indices 0–3 with all backends and returns which ones are
+    openable and deliver frames.  Useful for debugging camera issues
+    without starting the full processing thread.
+    """
+    results = []
+    backends_to_try: list[tuple[str, int]]
+    if sys.platform == 'win32':
+        backends_to_try = [
+            ('DirectShow',      cv2.CAP_DSHOW),
+            ('MediaFoundation', cv2.CAP_MSMF),
+            ('Auto',            cv2.CAP_ANY),
+        ]
+    else:
+        backends_to_try = [('Auto', cv2.CAP_ANY)]
+
+    for bname, bid in backends_to_try:
+        for idx in range(4):
+            try:
+                cap = cv2.VideoCapture(idx, bid)
+                opened = cap.isOpened()
+                frame_ok = False
+                width = height = fps_reported = 0
+                if opened:
+                    ret, frame = cap.read()
+                    frame_ok   = ret and frame is not None and frame.size > 0
+                    width      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height     = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    fps_reported = cap.get(cv2.CAP_PROP_FPS)
+                cap.release()
+                if opened:
+                    results.append({
+                        'index':   idx,
+                        'backend': bname,
+                        'opens':   opened,
+                        'frames':  frame_ok,
+                        'width':   width,
+                        'height':  height,
+                        'fps':     fps_reported,
+                    })
+            except Exception as e:
+                results.append({'index': idx, 'backend': bname, 'error': str(e)})
+
+    working = [r for r in results if r.get('frames')]
+    return jsonify({
+        'platform':      sys.platform,
+        'demo_mode':     DEMO_MODE,
+        'working_cameras': working,
+        'all_probed':    results,
+        'recommendation': (
+            f"Use WEBCAM_INDEX={working[0]['index']} with backend {working[0]['backend']}"
+            if working else
+            'No working camera found. Set DEMO_MODE=true or check USB/permissions.'
+        ),
+    })
+
+
 @app.route('/api/waveform', methods=['GET'])
 def get_waveform():
     """Return real-time PPG signal and RR intervals for waveform / Poincaré rendering."""
@@ -423,20 +483,70 @@ def _save_metrics_db(m: dict) -> None:
 # ------------------------------------------------------------------
 
 def _open_camera(index: int) -> cv2.VideoCapture:
-    """Open camera with retry logic. Raises RuntimeError if all attempts fail."""
-    for attempt in range(1, MAX_RETRIES + 1):
-        cap = cv2.VideoCapture(index)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_WIDTH)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-            cap.set(cv2.CAP_PROP_FPS,          FPS)
-            logger.info(f'Camera {index} opened on attempt {attempt}')
-            return cap
-        cap.release()
-        logger.warning(f'Camera {index}: open attempt {attempt}/{MAX_RETRIES} failed')
-        if attempt < MAX_RETRIES:
-            time.sleep(RETRY_DELAY_SEC)
-    raise RuntimeError(f'Cannot open camera {index} after {MAX_RETRIES} attempts')
+    """Open camera with multi-backend, multi-index retry logic.
+
+    Strategy (Windows-aware):
+      1. Prefer DirectShow (CAP_DSHOW) — most reliable on Windows laptops.
+      2. Fall back to Media Foundation (CAP_MSMF).
+      3. Finally try CAP_ANY (OpenCV default auto-select).
+      4. If requested index fails, automatically probe 0, 1, 2.
+    """
+    backends: list[tuple[str, int]]
+    if sys.platform == 'win32':
+        backends = [
+            ('DirectShow',         cv2.CAP_DSHOW),
+            ('MediaFoundation',    cv2.CAP_MSMF),
+            ('Auto',               cv2.CAP_ANY),
+        ]
+    elif sys.platform == 'darwin':
+        backends = [('AVFoundation', cv2.CAP_AVFOUNDATION), ('Auto', cv2.CAP_ANY)]
+    else:
+        backends = [('V4L2', cv2.CAP_V4L2), ('Auto', cv2.CAP_ANY)]
+
+    # If user set index=0 (default), also probe 1 and 2 automatically
+    indices = [index] if index > 0 else [0, 1, 2]
+
+    for backend_name, backend_id in backends:
+        for idx in indices:
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    cap = cv2.VideoCapture(idx, backend_id)
+                    if not cap.isOpened():
+                        cap.release()
+                        break   # this index/backend combo won't work; next backend
+
+                    # Verify the camera actually delivers frames
+                    ret, frame = cap.read()
+                    if not ret or frame is None or frame.size == 0:
+                        cap.release()
+                        break
+
+                    # Apply capture properties
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  FRAME_WIDTH)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+                    cap.set(cv2.CAP_PROP_FPS,          FPS)
+                    # Keep auto-exposure ON — rPPG runs on normalised channels
+                    # so absolute brightness changes are compensated by CHROM
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # minimise latency
+
+                    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    logger.info(
+                        f'Camera {idx} opened via {backend_name} '
+                        f'({actual_w}×{actual_h}) on attempt {attempt}'
+                    )
+                    return cap
+
+                except Exception as e:
+                    logger.debug(f'Camera {idx}/{backend_name} attempt {attempt}: {e}')
+                    if attempt < MAX_RETRIES:
+                        time.sleep(RETRY_DELAY_SEC)
+
+    raise RuntimeError(
+        f'Cannot open any camera. Tried indices={indices}. '
+        'Check that no other app is using the webcam, '
+        'or set DEMO_MODE=true to run without a camera.'
+    )
 
 
 # ------------------------------------------------------------------
@@ -686,8 +796,11 @@ def process_video() -> None:
         processing_error = None
         session_start    = datetime.now()
 
-        hr_ema:          Optional[float] = None
-        consec_failures: int = 0
+        hr_ema:            Optional[float] = None
+        consec_failures:   int             = 0
+        _prev_nose_xy:     Optional[tuple] = None   # for motion gating
+        _motion_px:        float           = 0.0    # last frame motion magnitude
+        MOTION_GATE_PX:    float           = 6.0    # max pixels/frame before gating rPPG
 
         # ===== MAIN LOOP =============================================
         while not stop_event.is_set():
@@ -738,18 +851,42 @@ def process_video() -> None:
                 logger.debug(f'Landmarks: {e}')
                 continue
 
+            # ── Motion gating (landmark velocity) ────────────────────
+            # Gate rPPG when head moves — motion injects colour artefacts.
+            # Nose-bridge (lm[6]) is a stable anatomical landmark.
+            _motion_px = 0.0
+            if len(lm) > 6:
+                nose_xy = lm[6]
+                if _prev_nose_xy is not None:
+                    dx = nose_xy[0] - _prev_nose_xy[0]
+                    dy = nose_xy[1] - _prev_nose_xy[1]
+                    _motion_px = float((dx * dx + dy * dy) ** 0.5)
+                _prev_nose_xy = nose_xy
+
             # ── rPPG (CHROM) ─────────────────────────────────────────
+            # FOREHEAD-ONLY ROI: scientifically the best rPPG region —
+            # high blood perfusion, minimal hair/beard interference, and
+            # least affected by lip/eye muscle movements.
+            # Region: rows [8%, 38%] of face height, cols [18%, 82%] width.
             hr = hrv_metrics = spo2 = signal_quality = rmssd = None
             hrv_freq = stress_idx = None
             ppg_signal: list = []
             rr_intervals: list = []
             try:
-                rgb_means = (
-                    float(np.mean(face_roi[:, :, 2])),  # R  (OpenCV = BGR)
-                    float(np.mean(face_roi[:, :, 1])),  # G
-                    float(np.mean(face_roi[:, :, 0])),  # B
-                )
-                rppg_proc.update(rgb_means)
+                fh_y1 = y + max(0, int(h * 0.08))
+                fh_y2 = y + min(h, int(h * 0.38))
+                fh_x1 = x + max(0, int(w * 0.18))
+                fh_x2 = x + min(w, int(w * 0.82))
+                forehead_roi = frame[fh_y1:fh_y2, fh_x1:fh_x2]
+
+                # Only update rPPG when head is still enough
+                if forehead_roi.size > 0 and _motion_px < MOTION_GATE_PX:
+                    rgb_means = (
+                        float(np.mean(forehead_roi[:, :, 2])),  # R (BGR order)
+                        float(np.mean(forehead_roi[:, :, 1])),  # G
+                        float(np.mean(forehead_roi[:, :, 0])),  # B
+                    )
+                    rppg_proc.update(rgb_means)
                 hr_raw, hrv_metrics = rppg_proc.compute_hr()
                 signal_quality = round(rppg_proc.signal_quality, 2)
                 spo2           = rppg_proc.estimate_spo2()
@@ -911,18 +1048,37 @@ def process_video() -> None:
             # ── Annotate frame for MJPEG stream ───────────────────────
             try:
                 ann = frame.copy()
+                sq  = signal_quality or 0.0
 
-                # Face bounding box colour: green=good, orange=fair, red=poor
-                sq = signal_quality or 0.0
+                # Face bounding box (colour = signal quality)
                 box_col = (0, 220, 80) if sq >= 0.6 else \
                           (0, 165, 255) if sq >= 0.3 else (0, 60, 220)
                 cv2.rectangle(ann, (x, y), (x + w, y + h), box_col, 2)
 
+                # Forehead ROI box — shows the region used for rPPG
+                fh_col = (0, 255, 255) if _motion_px < MOTION_GATE_PX \
+                         else (0, 80, 255)   # cyan=sampling, red=motion gated
+                cv2.rectangle(ann,
+                              (x + int(w * 0.18), y + int(h * 0.08)),
+                              (x + int(w * 0.82), y + int(h * 0.38)),
+                              fh_col, 1)
+                cv2.putText(ann, 'rPPG',
+                            (x + int(w * 0.18), y + int(h * 0.08) - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, fh_col, 1, cv2.LINE_AA)
+
                 # Eye landmark dots
-                for idx in LEFT_EYE + RIGHT_EYE:
-                    if idx < len(lm):
-                        cv2.circle(ann, (int(lm[idx][0]), int(lm[idx][1])),
+                for lm_idx in LEFT_EYE + RIGHT_EYE:
+                    if lm_idx < len(lm):
+                        cv2.circle(ann,
+                                   (int(lm[lm_idx][0]), int(lm[lm_idx][1])),
                                    2, (255, 200, 0), -1)
+
+                # Motion indicator (top-right corner)
+                if _motion_px >= MOTION_GATE_PX:
+                    cv2.putText(ann, 'MOTION',
+                                (ann.shape[1] - 90, 22),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                                (0, 80, 255), 2, cv2.LINE_AA)
 
                 # Top-left metric overlay
                 _oy = 26
@@ -933,18 +1089,18 @@ def process_video() -> None:
                     _oy += 20
 
                 if hr:
-                    _ot(f'HR:   {hr:.0f} BPM',     (100, 255, 100))
+                    _ot(f'HR:   {hr:.0f} BPM',        (100, 255, 100))
                 if spo2:
-                    _ot(f'SpO2: {spo2:.1f}%',       (100, 210, 255))
+                    _ot(f'SpO2: {spo2:.1f}% ~est',     (100, 210, 255))
                 if resp_rate:
-                    _ot(f'Resp: {resp_rate:.0f} BPM', (200, 220, 100))
+                    _ot(f'Resp: {resp_rate:.0f} BPM',  (200, 220, 100))
                 if rmssd:
-                    _ot(f'HRV:  {rmssd:.0f} ms',    (200, 160, 255))
+                    _ot(f'HRV:  {rmssd:.0f} ms',       (200, 160, 255))
                 if fatigue_score is not None:
-                    _ot(f'Fat:  {fatigue_score:.2f}', (255, 190, 80))
+                    _ot(f'Fat:  {fatigue_score:.2f}',   (255, 190, 80))
                 sq_col = (0, 220, 80) if sq >= 0.6 else \
                          (0, 165, 255) if sq >= 0.3 else (0, 80, 220)
-                _ot(f'SQ:   {int(sq * 100)}%', sq_col)
+                _ot(f'SQ:   {int(sq * 100)}%',  sq_col)
 
                 if not warmup_done:
                     bar_w = int(warmup_pct / 100 * (w - 4))
@@ -957,7 +1113,7 @@ def process_video() -> None:
                                 (160, 220, 255), 1, cv2.LINE_AA)
 
                 _, buf = cv2.imencode('.jpg', ann,
-                                      [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                      [cv2.IMWRITE_JPEG_QUALITY, 82])
                 if _:
                     with _frame_lock:
                         global _latest_frame
